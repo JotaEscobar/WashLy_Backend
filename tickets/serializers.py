@@ -1,7 +1,6 @@
 from rest_framework import serializers
 from .models import Cliente, Ticket, TicketItem, EstadoHistorial
 
-# ... (ClienteSerializer y ClienteListSerializer se quedan igual) ...
 class ClienteSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.ReadOnlyField()
     total_gastado = serializers.ReadOnlyField()
@@ -16,7 +15,6 @@ class ClienteListSerializer(serializers.ModelSerializer):
         model = Cliente
         fields = ['id', 'numero_documento', 'nombre_completo', 'telefono', 'email']
 
-# ... (TicketItemSerializer y EstadoHistorialSerializer se quedan igual) ...
 class TicketItemSerializer(serializers.ModelSerializer):
     servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
     prenda_nombre = serializers.CharField(source='prenda.nombre', read_only=True)
@@ -32,8 +30,6 @@ class EstadoHistorialSerializer(serializers.ModelSerializer):
         model = EstadoHistorial
         fields = ['id', 'estado_anterior', 'estado_nuevo', 'fecha_cambio', 'usuario', 'usuario_nombre', 'comentario']
         read_only_fields = ['fecha_cambio']
-
-# --- AQUÍ ESTÁN LOS CAMBIOS IMPORTANTES ---
 
 class TicketSerializer(serializers.ModelSerializer):
     items = TicketItemSerializer(many=True, read_only=True)
@@ -51,7 +47,7 @@ class TicketSerializer(serializers.ModelSerializer):
             'id', 'numero_ticket', 'qr_code', 'qr_code_url', 'cliente', 'cliente_info',
             'sede', 'estado', 'prioridad', 'fecha_recepcion', 'fecha_prometida',
             'fecha_entrega', 'observaciones', 'instrucciones_especiales',
-            'tipo_entrega', # <--- AGREGADO PARA QUE NO FALLE EL MODAL
+            'tipo_entrega',
             'requiere_pago_anticipado', 'empleado_asignado', 'items',
             'historial_estados', 'total', 'saldo_pendiente', 'esta_pagado',
             'creado_en', 'actualizado_en', 'activo'
@@ -67,6 +63,7 @@ class TicketSerializer(serializers.ModelSerializer):
             if request: return request.build_absolute_uri(obj.qr_code.url)
         return None
 
+# --- ARREGLO 2: AGREGADAS FECHAS (Evita NaN) ---
 class TicketListSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True)
     total = serializers.SerializerMethodField()
@@ -77,8 +74,8 @@ class TicketListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'numero_ticket', 'cliente', 'cliente_nombre', 'estado',
             'prioridad', 'fecha_recepcion', 'fecha_prometida', 'total',
-            'saldo_pendiente', 'activo', 
-            'creado_en', 'actualizado_en' # <--- AGREGADOS PARA EL CÁLCULO DE DÍAS
+            'saldo_pendiente', 'activo',
+            'creado_en', 'actualizado_en' 
         ]
     
     def get_total(self, obj): return float(obj.calcular_total())
@@ -111,7 +108,6 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         for item_data in items_data:
             TicketItem.objects.create(ticket=ticket, **item_data)
         
-        # LÓGICA DE PAGO CORREGIDA (SIN EL CAMPO ORIGEN)
         if pago_monto is not None and float(pago_monto) > 0:
             from pagos.models import Pago
             Pago.objects.create(
@@ -119,13 +115,11 @@ class TicketCreateSerializer(serializers.ModelSerializer):
                 monto=pago_monto,
                 metodo_pago=metodo_pago,
                 estado='PAGADO',
-                # origen='POS', <--- ELIMINADO PORQUE NO EXISTE EN TU MODELO
                 referencia=f'Pago inicial Ticket {ticket.numero_ticket}'
             )
         
         return ticket
 
-# ... (TicketUpdateEstadoSerializer se queda igual) ...
 class TicketUpdateEstadoSerializer(serializers.Serializer):
     estado = serializers.ChoiceField(choices=Ticket.ESTADO_CHOICES)
     comentario = serializers.CharField(required=False, allow_blank=True)
@@ -133,7 +127,6 @@ class TicketUpdateEstadoSerializer(serializers.Serializer):
     def validate_estado(self, value):
         ticket = self.context.get('ticket')
         if ticket:
-            # Validar transiciones de estado
             transiciones_validas = {
                 'RECIBIDO': ['EN_PROCESO', 'CANCELADO'],
                 'EN_PROCESO': ['LISTO', 'RECIBIDO', 'CANCELADO'],
