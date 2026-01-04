@@ -124,33 +124,38 @@ class TicketCreateSerializer(serializers.ModelSerializer):
     """Serializer para creación de tickets con items y pago inicial opcional"""
     items = TicketItemSerializer(many=True)
     
+    # Campos virtuales para recibir datos del POS
     pago_monto = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, write_only=True)
-    metodo_pago = serializers.CharField(max_length=50, required=False, write_only=True) # Ejem: 'EFECTIVO', 'YAPE'
+    metodo_pago = serializers.CharField(max_length=50, required=False, write_only=True)
 
     class Meta:
         model = Ticket
         fields = [
-            'id', 'numero_ticket', 
+            'id', 'numero_ticket', 'qr_code', 'creado_en',
             'cliente', 'sede', 'prioridad', 'fecha_prometida', 
             'tipo_entrega', 
             'observaciones', 'instrucciones_especiales',
             'requiere_pago_anticipado', 'empleado_asignado', 'items',
-            'pago_monto', 'metodo_pago' 
+            'pago_monto', 'metodo_pago'
         ]
-        read_only_fields = ['id', 'numero_ticket']
+        read_only_fields = ['id', 'numero_ticket', 'qr_code', 'creado_en']
     
     def create(self, validated_data):
+        # 1. Separar datos que no son del modelo Ticket
         items_data = validated_data.pop('items')
         pago_monto = validated_data.pop('pago_monto', None)
         metodo_pago = validated_data.pop('metodo_pago', 'EFECTIVO')
 
+        # 2. Crear Ticket
         ticket = Ticket.objects.create(**validated_data)
         
+        # 3. Crear Items
         for item_data in items_data:
             TicketItem.objects.create(ticket=ticket, **item_data)
         
-        if pago_monto and float(pago_monto) > 0:
-            from pagos.models import Pago 
+        # 4. Registrar Pago Inicial (Si aplica)
+        if pago_monto is not None and float(pago_monto) > 0:
+            from pagos.models import Pago
             Pago.objects.create(
                 ticket=ticket,
                 monto=pago_monto,
@@ -161,16 +166,6 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             )
         
         return ticket
-    
-    def create(self, validated_data):
-        items_data = validated_data.pop('items')
-        ticket = Ticket.objects.create(**validated_data)
-        
-        for item_data in items_data:
-            TicketItem.objects.create(ticket=ticket, **item_data)
-        
-        return ticket
-
 
 class TicketUpdateEstadoSerializer(serializers.Serializer):
     """Serializer para actualizar el estado de un ticket"""
