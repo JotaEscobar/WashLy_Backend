@@ -144,7 +144,7 @@ REST_FRAMEWORK = {
 #    "http://localhost:5173",     # <- Tu Vite Frontend
 #    "http://127.0.0.1:5173",     # <- Tu Vite Frontend (versión IP)
 #]
-CORS_ALLOWED_ORIGINS = True
+CORS_ALLOW_ALL_ORIGINS = True
 
 CORS_ALLOW_CREDENTIALS = True
 

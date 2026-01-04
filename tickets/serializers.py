@@ -121,16 +121,46 @@ class TicketListSerializer(serializers.ModelSerializer):
 
 
 class TicketCreateSerializer(serializers.ModelSerializer):
-    """Serializer para creación de tickets con items"""
+    """Serializer para creación de tickets con items y pago inicial opcional"""
     items = TicketItemSerializer(many=True)
     
+    pago_monto = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, write_only=True)
+    metodo_pago = serializers.CharField(max_length=50, required=False, write_only=True) # Ejem: 'EFECTIVO', 'YAPE'
+
     class Meta:
         model = Ticket
         fields = [
-            'cliente', 'sede', 'prioridad', 'fecha_prometida',
+            'id', 'numero_ticket', 
+            'cliente', 'sede', 'prioridad', 'fecha_prometida', 
+            'tipo_entrega', 
             'observaciones', 'instrucciones_especiales',
-            'requiere_pago_anticipado', 'empleado_asignado', 'items'
+            'requiere_pago_anticipado', 'empleado_asignado', 'items',
+            'pago_monto', 'metodo_pago' 
         ]
+        read_only_fields = ['id', 'numero_ticket']
+    
+    def create(self, validated_data):
+        items_data = validated_data.pop('items')
+        pago_monto = validated_data.pop('pago_monto', None)
+        metodo_pago = validated_data.pop('metodo_pago', 'EFECTIVO')
+
+        ticket = Ticket.objects.create(**validated_data)
+        
+        for item_data in items_data:
+            TicketItem.objects.create(ticket=ticket, **item_data)
+        
+        if pago_monto and float(pago_monto) > 0:
+            from pagos.models import Pago 
+            Pago.objects.create(
+                ticket=ticket,
+                monto=pago_monto,
+                metodo_pago=metodo_pago,
+                estado='PAGADO',
+                origen='POS',
+                referencia=f'Pago inicial Ticket {ticket.numero_ticket}'
+            )
+        
+        return ticket
     
     def create(self, validated_data):
         items_data = validated_data.pop('items')

@@ -11,12 +11,13 @@ import string
 from datetime import datetime
 
 
-def generar_numero_unico(prefijo='', longitud=8):
+def generar_numero_unico(prefijo='', longitud=4): 
     """
-    Genera un número único con prefijo
-    Formato: PREFIJO-YYYYMMDD-RANDOM
+    Genera un número único más corto.
+    Formato: PREFIJO-YYMMDD-1234
+    Ejemplo: TKT-240104-8821
     """
-    fecha = datetime.now().strftime('%Y%m%d')
+    fecha = datetime.now().strftime('%y%m%d') 
     aleatorio = ''.join(random.choices(string.digits, k=longitud))
     
     if prefijo:

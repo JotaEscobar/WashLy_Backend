@@ -82,6 +82,11 @@ class Ticket(AuditModel, SoftDeleteModel):
         ('URGENTE', 'Urgente'),
         ('EXPRESS', 'Express'),
     ]
+
+    TIPO_ENTREGA_CHOICES = [
+            ('RECOJO', 'Recojo en Tienda'),
+            ('DELIVERY', 'Delivery'),
+    ]
     
     # Identificación única
     numero_ticket = models.CharField(
@@ -125,6 +130,12 @@ class Ticket(AuditModel, SoftDeleteModel):
         choices=PRIORIDAD_CHOICES,
         default='NORMAL',
         verbose_name="Prioridad"
+    )
+    tipo_entrega = models.CharField(
+        max_length=20, 
+        choices=TIPO_ENTREGA_CHOICES, 
+        default='RECOJO',
+        verbose_name="Tipo de Entrega"
     )
     
     fecha_recepcion = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Recepción")
@@ -237,7 +248,12 @@ class TicketItem(AuditModel):
         blank=True
     )
     
-    cantidad = models.PositiveIntegerField(default=1, verbose_name="Cantidad")
+    cantidad = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=1, 
+        verbose_name="Cantidad"
+    )
     precio_unitario = models.DecimalField(
         max_digits=10,
         decimal_places=2,
