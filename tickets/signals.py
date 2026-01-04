@@ -18,7 +18,6 @@ def ticket_estado_cambiado(sender, instance, **kwargs):
             ticket_anterior = Ticket.objects.get(pk=instance.pk)
             if ticket_anterior.estado != instance.estado:
                 # El estado ha cambiado
-                # Esta lógica también se puede manejar en el viewset
                 pass
         except Ticket.DoesNotExist:
             pass
@@ -30,7 +29,8 @@ def enviar_notificacion_cambio_estado(sender, instance, created, **kwargs):
     Signal que envía notificación cuando cambia el estado de un ticket
     """
     if created:
-        from notificaciones.tasks import enviar_notificacion_ticket
+        # NOTA: Deshabilitado temporalmente para desarrollo local sin Redis/Celery
+        # from notificaciones.tasks import enviar_notificacion_ticket
         
         # Mensajes según el estado
         mensajes = {
@@ -46,13 +46,14 @@ def enviar_notificacion_cambio_estado(sender, instance, created, **kwargs):
             f'Su ticket {instance.ticket.numero_ticket} cambió a {instance.estado_nuevo}'
         )
         
-        # Enviar notificación (tarea asíncrona)
-        try:
-            enviar_notificacion_ticket.delay(
-                ticket_id=instance.ticket.id,
-                mensaje=mensaje,
-                canales=['EMAIL', 'WHATSAPP']
-            )
-        except Exception as e:
-            # Log del error pero no bloquear el flujo
-            print(f"Error al enviar notificación: {e}")
+        # Enviar notificación (tarea asíncrona) - DESHABILITADO
+        # try:
+        #     enviar_notificacion_ticket.delay(
+        #         ticket_id=instance.ticket.id,
+        #         mensaje=mensaje,
+        #         canales=['EMAIL', 'WHATSAPP']
+        #     )
+        # except Exception as e:
+        #     # Log del error pero no bloquear el flujo
+        #     print(f"Error al enviar notificación: {e}")
+        pass
