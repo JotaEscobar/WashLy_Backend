@@ -1,4 +1,4 @@
-from rest_framework import viewsets, filters
+from rest_framework import viewsets, filters, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
@@ -9,38 +9,54 @@ class PagoViewSet(viewsets.ModelViewSet):
     queryset = Pago.objects.all()
     serializer_class = PagoSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['numero_pago', 'ticket__numero_ticket', 'ticket__cliente_nombre', 'ticket__cliente_telefono']
+    search_fields = ['numero_pago', 'ticket__numero_ticket', 'ticket__cliente__nombres', 'ticket__cliente__apellidos']
     ordering = ['-fecha_pago']
 
     def perform_create(self, serializer):
-        # Al crear un pago (generalmente desde Tickets o POS), se vincula el usuario
-        serializer.save(creado_por=self.request.user)
+        # Validación estricta: No permitir pago sin caja abierta
+        user = self.request.user
+        caja_abierta = CajaSesion.objects.filter(usuario=user, estado='ABIERTA').exists()
+        
+        if not caja_abierta:
+            raise serializers.ValidationError(
+                {"error": "No tienes una caja abierta. Apertura caja para registrar pagos."}
+            )
+            
+        serializer.save(creado_por=user)
 
     @action(detail=True, methods=['post'])
     def anular(self, request, pk=None):
         pago = self.get_object()
-        # Lógica de Extorno: Cambia estado y libera saldo en ticket (si implementas esa lógica en ticket)
+        
+        # 1. Validar que el pago sea de HOY (Política de seguridad)
+        if pago.fecha_pago.date() != timezone.now().date():
+            return Response(
+                {'error': 'Solo se pueden extornar pagos realizados el día de hoy.'}, 
+                status=400
+            )
+
+        # 2. Validar que no esté ya anulado
+        if pago.estado == 'ANULADO':
+             return Response({'error': 'El pago ya se encuentra anulado.'}, status=400)
+
+        # 3. Anulación lógica (Opción B: El registro queda, pero estado='ANULADO')
+        # Esto hace que CajaSesionSerializer deje de sumarlo automáticamente.
         pago.estado = 'ANULADO'
         pago.save()
         
-        # Aquí podrías llamar a un signal o método para actualizar el saldo del ticket
-        ticket = pago.ticket
-        # ticket.saldo_pendiente += pago.monto ... (Esto ya depende de tu modelo Ticket)
-        # ticket.save()
-        
-        return Response({'status': 'Pago anulado'})
+        return Response({'status': 'Pago extornado. El saldo ha retornado al ticket.'})
 
 class CajaViewSet(viewsets.ModelViewSet):
-    queryset = CajaSesion.objects.all()
+    queryset = CajaSesion.objects.all().order_by('-fecha_apertura')
     serializer_class = CajaSesionSerializer
 
     @action(detail=False, methods=['get'])
     def mi_caja(self, request):
-        # Devuelve la caja ABIERTA del usuario actual
+        """Devuelve la caja ABIERTA del usuario actual"""
         caja = CajaSesion.objects.filter(usuario=request.user, estado='ABIERTA').first()
         if caja:
             return Response(self.get_serializer(caja).data)
-        return Response(None) # No hay caja
+        return Response(None)
 
     @action(detail=False, methods=['post'])
     def abrir(self, request):
@@ -82,3 +98,72 @@ class CajaViewSet(viewsets.ModelViewSet):
             creado_por=request.user
         )
         return Response({'status': 'Movimiento registrado'})
+
+    @action(detail=True, methods=['get'])
+    def timeline(self, request, pk=None):
+        """
+        Retorna el 'Diario Electrónico' de la caja (Opción B).
+        Muestra la fila original tachada si se anula.
+        """
+        caja = self.get_object()
+        events = []
+
+        # 1. Apertura
+        events.append({
+            'id': f'apertura-{caja.id}',
+            'tipo_evento': 'APERTURA',
+            'fecha': caja.fecha_apertura,
+            'monto': caja.monto_inicial,
+            'descripcion': 'Saldo Inicial de Caja',
+            'usuario': caja.usuario.username,
+            'es_entrada': True,
+            'estado': 'OK'
+        })
+        
+        # 2. Pagos (Ventas)
+        pagos = Pago.objects.filter(caja=caja).select_related('ticket')
+        for p in pagos:
+            events.append({
+                'id': f'pago-{p.id}',
+                'tipo_evento': 'VENTA',
+                'fecha': p.fecha_pago,
+                'monto': p.monto,
+                'descripcion': f'Cobro Ticket {p.ticket.numero_ticket}',
+                'metodo': p.metodo_pago,
+                'usuario': p.creado_por.username if p.creado_por else 'Sistema',
+                'es_entrada': True,
+                'estado': p.estado # 'PAGADO' o 'ANULADO'
+            })
+            
+        # 3. Movimientos (Ingresos/Egresos Manuales)
+        movimientos = caja.movimientos_extra.all()
+        for m in movimientos:
+            events.append({
+                'id': f'mov-{m.id}',
+                'tipo_evento': m.tipo, # INGRESO / EGRESO
+                'fecha': m.creado_en,
+                'monto': m.monto,
+                'descripcion': f'{m.categoria}: {m.descripcion}',
+                'metodo': 'EFECTIVO', 
+                'usuario': m.creado_por.username if m.creado_por else 'Sistema',
+                'es_entrada': m.tipo == 'INGRESO',
+                'estado': 'OK'
+            })
+            
+        # 4. Cierre
+        if caja.fecha_cierre:
+             events.append({
+                'id': f'cierre-{caja.id}',
+                'tipo_evento': 'CIERRE',
+                'fecha': caja.fecha_cierre,
+                'monto': caja.monto_real or 0,
+                'descripcion': f'Cierre de Turno (Diferencia: {caja.diferencia})',
+                'usuario': caja.usuario.username,
+                'es_entrada': None, 
+                'estado': 'OK'
+            })
+
+        # Ordenar por fecha
+        events.sort(key=lambda x: x['fecha'])
+        
+        return Response(events)
