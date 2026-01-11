@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.utils import timezone
 from .models import Cliente, Ticket, TicketItem, EstadoHistorial
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -63,7 +64,6 @@ class TicketSerializer(serializers.ModelSerializer):
             if request: return request.build_absolute_uri(obj.qr_code.url)
         return None
 
-# --- ARREGLO 2: AGREGADAS FECHAS (Evita NaN) ---
 class TicketListSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True)
     total = serializers.SerializerMethodField()
@@ -83,6 +83,7 @@ class TicketListSerializer(serializers.ModelSerializer):
 
 class TicketCreateSerializer(serializers.ModelSerializer):
     items = TicketItemSerializer(many=True)
+    # Campos para pago inmediato
     pago_monto = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, write_only=True)
     metodo_pago = serializers.CharField(max_length=50, required=False, write_only=True)
 
@@ -102,20 +103,40 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         items_data = validated_data.pop('items')
         pago_monto = validated_data.pop('pago_monto', None)
         metodo_pago = validated_data.pop('metodo_pago', 'EFECTIVO')
+        
+        # --- VALIDACIÓN CRÍTICA DE CAJA ---
+        # Si intenta pagar algo (monto > 0), validamos que tenga caja abierta.
+        request = self.context.get('request')
+        user = request.user if request else None
+        caja_abierta = None
 
+        if pago_monto is not None and float(pago_monto) > 0:
+            from pagos.models import CajaSesion # Importación lazy para evitar ciclos
+            caja_abierta = CajaSesion.objects.filter(usuario=user, estado='ABIERTA').first()
+            
+            if not caja_abierta:
+                raise serializers.ValidationError({
+                    "error": "No tienes una caja abierta. Apertura caja para recibir pagos (Totales o Parciales). Solo puedes crear tickets PENDIENTES sin pago."
+                })
+
+        # Crear Ticket
         ticket = Ticket.objects.create(**validated_data)
         
+        # Crear Items
         for item_data in items_data:
             TicketItem.objects.create(ticket=ticket, **item_data)
         
+        # Crear Pago si aplica
         if pago_monto is not None and float(pago_monto) > 0:
             from pagos.models import Pago
             Pago.objects.create(
                 ticket=ticket,
+                caja=caja_abierta, # <--- IMPORTANTE: VINCULAR A LA CAJA
                 monto=pago_monto,
                 metodo_pago=metodo_pago,
                 estado='PAGADO',
-                referencia=f'Pago inicial Ticket {ticket.numero_ticket}'
+                referencia=f'Pago inicial Ticket {ticket.numero_ticket}',
+                creado_por=user
             )
         
         return ticket

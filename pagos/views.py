@@ -2,7 +2,9 @@ from rest_framework import viewsets, filters, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
-from decimal import Decimal # <--- NUEVO IMPORT NECESARIO
+from decimal import Decimal
+import json
+
 from .models import Pago, CajaSesion, MovimientoCaja
 from .serializers import PagoSerializer, CajaSesionSerializer, MovimientoCajaSerializer
 
@@ -16,20 +18,21 @@ class PagoViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # Validación estricta: No permitir pago sin caja abierta
         user = self.request.user
-        caja_abierta = CajaSesion.objects.filter(usuario=user, estado='ABIERTA').exists()
+        caja_abierta = CajaSesion.objects.filter(usuario=user, estado='ABIERTA').first()
         
         if not caja_abierta:
             raise serializers.ValidationError(
                 {"error": "No tienes una caja abierta. Apertura caja para registrar pagos."}
             )
             
-        serializer.save(creado_por=user)
+        # Asignamos la caja automáticamente y el usuario
+        serializer.save(creado_por=user, caja=caja_abierta)
 
     @action(detail=True, methods=['post'])
     def anular(self, request, pk=None):
         pago = self.get_object()
         
-        # 1. Validar que el pago sea de HOY (Política de seguridad)
+        # 1. Validar que el pago sea de HOY
         if pago.fecha_pago.date() != timezone.now().date():
             return Response(
                 {'error': 'Solo se pueden extornar pagos realizados el día de hoy.'}, 
@@ -40,8 +43,7 @@ class PagoViewSet(viewsets.ModelViewSet):
         if pago.estado == 'ANULADO':
              return Response({'error': 'El pago ya se encuentra anulado.'}, status=400)
 
-        # 3. Anulación lógica (Opción B: El registro queda, pero estado='ANULADO')
-        # Esto hace que CajaSesionSerializer deje de sumarlo automáticamente.
+        # 3. Anulación lógica
         pago.estado = 'ANULADO'
         pago.save()
         
@@ -64,40 +66,53 @@ class CajaViewSet(viewsets.ModelViewSet):
         if CajaSesion.objects.filter(usuario=request.user, estado='ABIERTA').exists():
             return Response({'error': 'Ya tienes una caja abierta'}, status=400)
         
+        # Obtenemos el detalle de apertura (Efectivo, Tarjeta, etc) si lo envían
+        detalle = request.data.get('detalle_apertura', {})
+        monto_inicial = Decimal(str(request.data.get('monto_inicial', 0)))
+        
+        # Guardamos la caja
         caja = CajaSesion.objects.create(
             usuario=request.user,
-            monto_inicial=request.data.get('monto_inicial', 0),
+            monto_inicial=monto_inicial,
+            detalle_apertura=json.dumps(detalle) if isinstance(detalle, dict) else str(detalle),
             estado='ABIERTA'
         )
-        return Response(self.get_serializer(caja).data)
+        
+        # IMPORTANTE: Usamos el contexto para que el serializer funcione bien si usa 'request'
+        serializer = self.get_serializer(caja, context={'request': request})
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
     def cerrar(self, request, pk=None):
         caja = self.get_object()
         
-        # CORRECCIÓN: Convertir input a Decimal explícitamente
         monto_input = request.data.get('monto_real', 0)
         caja.monto_real = Decimal(str(monto_input))
-        
         caja.comentarios = request.data.get('comentarios', '')
+        
+        # Detalle de cierre opcional
+        detalle_cierre = request.data.get('detalle_cierre', {})
+        caja.detalle_cierre = json.dumps(detalle_cierre) if isinstance(detalle_cierre, dict) else str(detalle_cierre)
         
         # Calculamos sistema al momento del cierre
         serializer = self.get_serializer(caja)
-        
-        # CORRECCIÓN: DRF devuelve Decimal como String, convertir a Decimal para operar
         caja.monto_sistema = Decimal(str(serializer.data['saldo_actual']))
         
-        # Ahora sí es seguro restar (Decimal - Decimal)
         caja.diferencia = caja.monto_real - caja.monto_sistema
-        
         caja.estado = 'CERRADA'
         caja.fecha_cierre = timezone.now()
         caja.save()
+        
         return Response(self.get_serializer(caja).data)
 
     @action(detail=True, methods=['post'])
     def movimiento(self, request, pk=None):
         caja = self.get_object()
+        
+        # Validar que la caja esté abierta para recibir movimientos
+        if caja.estado != 'ABIERTA':
+             return Response({'error': 'No se pueden agregar movimientos a una caja cerrada'}, status=400)
+
         MovimientoCaja.objects.create(
             caja=caja,
             tipo=request.data.get('tipo'), # INGRESO / EGRESO
@@ -111,8 +126,7 @@ class CajaViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def timeline(self, request, pk=None):
         """
-        Retorna el 'Diario Electrónico' de la caja (Opción B).
-        Muestra la fila original tachada si se anula.
+        Retorna el 'Diario Electrónico' de la caja.
         """
         caja = self.get_object()
         events = []
@@ -130,6 +144,7 @@ class CajaViewSet(viewsets.ModelViewSet):
         })
         
         # 2. Pagos (Ventas)
+        # Filtramos explícitamente por ID de caja para asegurar consistencia
         pagos = Pago.objects.filter(caja=caja).select_related('ticket')
         for p in pagos:
             events.append({
@@ -160,7 +175,7 @@ class CajaViewSet(viewsets.ModelViewSet):
             })
             
         # 4. Cierre
-        if caja.fecha_cierre:
+        if caja.fecha_cierre and caja.estado == 'CERRADA':
              events.append({
                 'id': f'cierre-{caja.id}',
                 'tipo_evento': 'CIERRE',
@@ -172,7 +187,7 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'estado': 'OK'
             })
 
-        # Ordenar por fecha
-        events.sort(key=lambda x: x['fecha'])
+        # Ordenar por fecha, manejando posibles Nones (aunque no debería haber)
+        events.sort(key=lambda x: x['fecha'] if x['fecha'] else timezone.now())
         
         return Response(events)

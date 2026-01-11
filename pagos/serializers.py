@@ -1,15 +1,26 @@
 from rest_framework import serializers
 from django.db.models import Sum
+from django.utils import timezone
 from .models import Pago, CajaSesion, MovimientoCaja
 
 class PagoSerializer(serializers.ModelSerializer):
     ticket_numero = serializers.CharField(source='ticket.numero_ticket', read_only=True)
     cliente_nombre = serializers.CharField(source='ticket.cliente_info.nombre_completo', read_only=True)
+    es_anulable = serializers.SerializerMethodField()
     
     class Meta:
         model = Pago
         fields = '__all__'
-        read_only_fields = ['numero_pago', 'caja']
+        read_only_fields = ['numero_pago', 'caja', 'es_anulable']
+
+    def get_es_anulable(self, obj):
+        """
+        Flag para el frontend: 
+        Permite anular solo si es de HOY y no está ya anulado.
+        """
+        es_hoy = obj.fecha_pago.date() == timezone.now().date()
+        no_esta_anulado = obj.estado != 'ANULADO'
+        return es_hoy and no_esta_anulado
 
 class MovimientoCajaSerializer(serializers.ModelSerializer):
     class Meta:
