@@ -2,6 +2,7 @@ from rest_framework import viewsets, filters, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
+from decimal import Decimal # <--- NUEVO IMPORT NECESARIO
 from .models import Pago, CajaSesion, MovimientoCaja
 from .serializers import PagoSerializer, CajaSesionSerializer, MovimientoCajaSerializer
 
@@ -73,12 +74,20 @@ class CajaViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def cerrar(self, request, pk=None):
         caja = self.get_object()
-        caja.monto_real = request.data.get('monto_real', 0)
+        
+        # CORRECCIÓN: Convertir input a Decimal explícitamente
+        monto_input = request.data.get('monto_real', 0)
+        caja.monto_real = Decimal(str(monto_input))
+        
         caja.comentarios = request.data.get('comentarios', '')
         
         # Calculamos sistema al momento del cierre
         serializer = self.get_serializer(caja)
-        caja.monto_sistema = serializer.data['saldo_actual'] 
+        
+        # CORRECCIÓN: DRF devuelve Decimal como String, convertir a Decimal para operar
+        caja.monto_sistema = Decimal(str(serializer.data['saldo_actual']))
+        
+        # Ahora sí es seguro restar (Decimal - Decimal)
         caja.diferencia = caja.monto_real - caja.monto_sistema
         
         caja.estado = 'CERRADA'
