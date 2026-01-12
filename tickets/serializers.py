@@ -1,9 +1,12 @@
 from rest_framework import serializers
 from django.utils import timezone
+from django.db.models import Sum
 from .models import Cliente, Ticket, TicketItem, EstadoHistorial
 
-# ... (Mantener ClienteSerializer, ClienteListSerializer, TicketItemSerializer, EstadoHistorialSerializer IGUALES) ...
+# --- SERIALIZERS DE CLIENTE ---
+
 class ClienteSerializer(serializers.ModelSerializer):
+    """Serializer básico para CRUD de clientes"""
     nombre_completo = serializers.ReadOnlyField()
     total_gastado = serializers.ReadOnlyField()
     class Meta:
@@ -12,10 +15,63 @@ class ClienteSerializer(serializers.ModelSerializer):
         read_only_fields = ['creado_en', 'fecha_registro']
 
 class ClienteListSerializer(serializers.ModelSerializer):
+    """Serializer ligero para dropdowns y selecciones simples"""
     nombre_completo = serializers.ReadOnlyField()
     class Meta:
         model = Cliente
         fields = ['id', 'numero_documento', 'nombre_completo', 'telefono', 'email']
+
+class ClienteCRMSerializer(serializers.ModelSerializer):
+    """
+    Serializer ROBUSTO para el módulo de Clientes (Directorio).
+    Incluye indicadores de negocio calculados al vuelo.
+    """
+    nombre_completo = serializers.ReadOnlyField()
+    ultima_visita = serializers.DateTimeField(read_only=True)
+    saldo_pendiente = serializers.SerializerMethodField()
+    es_vip = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Cliente
+        fields = [
+            'id', 'tipo_documento', 'numero_documento', 
+            'nombre_completo', 'nombres', 'apellidos', 'telefono', 'email', 'direccion', 
+            'ultima_visita', 'saldo_pendiente', 'es_vip', 
+            'notas', 'preferencias', 'creado_en'
+        ]
+    
+    def get_saldo_pendiente(self, obj):
+        # Calcula la deuda total sumando los saldos de todos los tickets activos
+        # Optimización: Esto puede ser pesado si no se usa prefetch_related en la vista
+        deuda = 0
+        tickets_activos = obj.tickets.exclude(estado='CANCELADO')
+        for ticket in tickets_activos:
+            deuda += ticket.calcular_saldo_pendiente()
+        return float(deuda)
+
+    def get_es_vip(self, obj):
+        # Lógica VIP: Gasto > 200 en el mes actual
+        hoy = timezone.now()
+        inicio_mes = hoy.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        # Filtramos pagos realizados este mes asociados a tickets del cliente
+        # Usamos la relación inversa a través de Tickets -> Pagos
+        total_mes = 0
+        
+        # Nota: Idealmente esto se optimiza con anotaciones en el QuerySet, 
+        # pero por ahora lo mantenemos en lógica python para respetar tu estructura actual.
+        tickets = obj.tickets.all()
+        for ticket in tickets:
+            # Asumiendo que Ticket tiene related_name='pagos' desde el modelo Pago
+            pagos_mes = ticket.pagos.filter(
+                estado='PAGADO',
+                fecha_pago__gte=inicio_mes
+            ).aggregate(total=Sum('monto'))['total'] or 0
+            total_mes += pagos_mes
+            
+        return total_mes > 200
+
+# --- SERIALIZERS DE TICKET Y OTROS ---
 
 class TicketItemSerializer(serializers.ModelSerializer):
     servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
@@ -32,7 +88,6 @@ class EstadoHistorialSerializer(serializers.ModelSerializer):
         model = EstadoHistorial
         fields = ['id', 'estado_anterior', 'estado_nuevo', 'fecha_cambio', 'usuario', 'usuario_nombre', 'comentario']
         read_only_fields = ['fecha_cambio']
-# ...
 
 class TicketSerializer(serializers.ModelSerializer):
     items = TicketItemSerializer(many=True, read_only=True)
@@ -86,14 +141,10 @@ class TicketListSerializer(serializers.ModelSerializer):
     def get_saldo_pendiente(self, obj): return float(obj.calcular_saldo_pendiente())
     
     def get_es_extornable(self, obj):
-        # Corrección: Usar localtime para la zona horaria de Perú
         hoy = timezone.localtime(timezone.now()).date()
-        
-        # Intentamos obtener la relación con pagos, soportando 'pagos' o 'pago_set'
         relacion_pagos = getattr(obj, 'pagos', getattr(obj, 'pago_set', None))
         
         if relacion_pagos:
-            # Filtramos en Python o DB, asegurando que la fecha del pago también se convierta a local
             pagos_hoy = [
                 p for p in relacion_pagos.filter(estado='PAGADO') 
                 if timezone.localtime(p.fecha_pago).date() == hoy

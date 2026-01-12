@@ -2,13 +2,13 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Q, Sum, F, DecimalField, OuterRef, Subquery
+from django.db.models import Q, Sum, F, DecimalField, OuterRef, Subquery, Max
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from .models import Cliente, Ticket, TicketItem, EstadoHistorial
 from .serializers import (
-    ClienteSerializer, ClienteListSerializer,
+    ClienteSerializer, ClienteListSerializer, ClienteCRMSerializer,
     TicketSerializer, TicketListSerializer, TicketCreateSerializer,
     TicketItemSerializer, EstadoHistorialSerializer, TicketUpdateEstadoSerializer
 )
@@ -18,12 +18,33 @@ class ClienteViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['numero_documento', 'nombres', 'apellidos', 'telefono', 'email']
-    ordering_fields = ['creado_en', 'nombres', 'apellidos']
+    ordering_fields = ['creado_en', 'nombres', 'apellidos', 'ultima_visita']
     ordering = ['-creado_en']
     
-    def get_serializer_class(self):
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        
+        # --- OPTIMIZACIÓN CRM ---
+        # 1. Anotamos la fecha del último ticket recibido (Última Visita) directamente en SQL
+        queryset = queryset.annotate(
+            ultima_visita=Max('tickets__fecha_recepcion')
+        )
+        
+        # 2. Si estamos listando (Directorio), traemos la data relacionada para no matar la DB
+        #    al calcular Deuda y VIP en el serializer loop.
         if self.action == 'list':
-            return ClienteListSerializer
+            queryset = queryset.prefetch_related(
+                'tickets', 
+                'tickets__items', 
+                'tickets__pagos'
+            )
+            
+        return queryset
+
+    def get_serializer_class(self):
+        # Usamos el serializer optimizado para la tabla principal
+        if self.action == 'list':
+            return ClienteCRMSerializer
         return ClienteSerializer
     
     def perform_create(self, serializer):
@@ -122,7 +143,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         if fecha_hasta:
             queryset = queryset.filter(fecha_recepcion__date__lte=fecha_hasta)
         
-        # --- FILTRO DEUDA (Aquí estaba el 'pass' antes) ---
+        # --- FILTRO DEUDA ---
         pendientes_pago = self.request.query_params.get('pendientes_pago', None)
         if pendientes_pago == 'true':
             # Muestra tickets donde (Total Ticket > Total Pagado) Y que no estén cancelados
