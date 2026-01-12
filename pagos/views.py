@@ -61,6 +61,27 @@ class CajaViewSet(viewsets.ModelViewSet):
             return Response(self.get_serializer(caja).data)
         return Response(None)
 
+    @action(detail=False, methods=['get'])
+    def ultimo_cierre(self, request):
+        """
+        Devuelve los saldos finales de la última caja CERRADA globalmente (para continuidad de turnos).
+        """
+        ultima_caja = CajaSesion.objects.filter(estado='CERRADA').order_by('-fecha_cierre').first()
+        
+        if not ultima_caja:
+            return Response(None) # No hay cierres previos
+            
+        detalle = {}
+        try:
+            detalle = json.loads(ultima_caja.detalle_cierre) if ultima_caja.detalle_cierre else {}
+        except:
+            detalle = {}
+            
+        return Response({
+            'EFECTIVO': ultima_caja.monto_final_real, # Saldo físico declarado
+            'detalle': detalle
+        })
+
     @action(detail=False, methods=['post'])
     def abrir(self, request):
         if CajaSesion.objects.filter(usuario=request.user, estado='ABIERTA').exists():
@@ -87,7 +108,7 @@ class CajaViewSet(viewsets.ModelViewSet):
         caja = self.get_object()
         
         monto_input = request.data.get('monto_real', 0)
-        caja.monto_real = Decimal(str(monto_input))
+        caja.monto_final_real = Decimal(str(monto_input)) # Corregido nombre campo model
         caja.comentarios = request.data.get('comentarios', '')
         
         # Detalle de cierre opcional
@@ -96,9 +117,9 @@ class CajaViewSet(viewsets.ModelViewSet):
         
         # Calculamos sistema al momento del cierre
         serializer = self.get_serializer(caja)
-        caja.monto_sistema = Decimal(str(serializer.data['saldo_actual']))
+        caja.monto_final_sistema = Decimal(str(serializer.data['saldo_actual'])) # Corregido nombre campo model
         
-        caja.diferencia = caja.monto_real - caja.monto_sistema
+        caja.diferencia = caja.monto_final_real - caja.monto_final_sistema
         caja.estado = 'CERRADA'
         caja.fecha_cierre = timezone.now()
         caja.save()
@@ -180,7 +201,7 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'id': f'cierre-{caja.id}',
                 'tipo_evento': 'CIERRE',
                 'fecha': caja.fecha_cierre,
-                'monto': caja.monto_real or 0,
+                'monto': caja.monto_final_real or 0,
                 'descripcion': f'Cierre de Turno (Diferencia: {caja.diferencia})',
                 'usuario': caja.usuario.username,
                 'es_entrada': None, 
