@@ -1,4 +1,4 @@
-from rest_framework import viewsets, filters, serializers
+from rest_framework import viewsets, filters, serializers, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
@@ -11,12 +11,12 @@ from .serializers import PagoSerializer, CajaSesionSerializer, MovimientoCajaSer
 class PagoViewSet(viewsets.ModelViewSet):
     queryset = Pago.objects.all()
     serializer_class = PagoSerializer
+    permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['numero_pago', 'ticket__numero_ticket', 'ticket__cliente__nombres', 'ticket__cliente__apellidos']
     ordering = ['-fecha_pago']
 
     def perform_create(self, serializer):
-        # Validación estricta: No permitir pago sin caja abierta
         user = self.request.user
         caja_abierta = CajaSesion.objects.filter(usuario=user, estado='ABIERTA').first()
         
@@ -25,25 +25,21 @@ class PagoViewSet(viewsets.ModelViewSet):
                 {"error": "No tienes una caja abierta. Apertura caja para registrar pagos."}
             )
             
-        # Asignamos la caja automáticamente y el usuario
         serializer.save(creado_por=user, caja=caja_abierta)
 
     @action(detail=True, methods=['post'])
     def anular(self, request, pk=None):
         pago = self.get_object()
         
-        # 1. Validar que el pago sea de HOY
         if pago.fecha_pago.date() != timezone.now().date():
             return Response(
                 {'error': 'Solo se pueden extornar pagos realizados el día de hoy.'}, 
                 status=400
             )
 
-        # 2. Validar que no esté ya anulado
         if pago.estado == 'ANULADO':
              return Response({'error': 'El pago ya se encuentra anulado.'}, status=400)
 
-        # 3. Anulación lógica
         pago.estado = 'ANULADO'
         pago.save()
         
@@ -52,10 +48,10 @@ class PagoViewSet(viewsets.ModelViewSet):
 class CajaViewSet(viewsets.ModelViewSet):
     queryset = CajaSesion.objects.all().order_by('-fecha_apertura')
     serializer_class = CajaSesionSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
     @action(detail=False, methods=['get'])
     def mi_caja(self, request):
-        """Devuelve la caja ABIERTA del usuario actual"""
         caja = CajaSesion.objects.filter(usuario=request.user, estado='ABIERTA').first()
         if caja:
             return Response(self.get_serializer(caja).data)
@@ -64,21 +60,24 @@ class CajaViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def ultimo_cierre(self, request):
         """
-        Devuelve los saldos finales de la última caja CERRADA globalmente (para continuidad de turnos).
+        CORREGIDO: Extrae el EFECTIVO específico del desglose del último cierre.
         """
         ultima_caja = CajaSesion.objects.filter(estado='CERRADA').order_by('-fecha_cierre').first()
         
         if not ultima_caja:
-            return Response(None) # No hay cierres previos
+            return Response(None)
             
         detalle = {}
         try:
             detalle = json.loads(ultima_caja.detalle_cierre) if ultima_caja.detalle_cierre else {}
         except:
             detalle = {}
+        
+        # FIX: Devolvemos el EFECTIVO específico del detalle JSON, no el monto_final_real
+        efectivo_real = detalle.get('EFECTIVO', 0)
             
         return Response({
-            'EFECTIVO': ultima_caja.monto_final_real, # Saldo físico declarado
+            'EFECTIVO': efectivo_real,
             'detalle': detalle
         })
 
@@ -87,11 +86,9 @@ class CajaViewSet(viewsets.ModelViewSet):
         if CajaSesion.objects.filter(usuario=request.user, estado='ABIERTA').exists():
             return Response({'error': 'Ya tienes una caja abierta'}, status=400)
         
-        # Obtenemos el detalle de apertura (Efectivo, Tarjeta, etc) si lo envían
         detalle = request.data.get('detalle_apertura', {})
         monto_inicial = Decimal(str(request.data.get('monto_inicial', 0)))
         
-        # Guardamos la caja
         caja = CajaSesion.objects.create(
             usuario=request.user,
             monto_inicial=monto_inicial,
@@ -99,7 +96,6 @@ class CajaViewSet(viewsets.ModelViewSet):
             estado='ABIERTA'
         )
         
-        # IMPORTANTE: Usamos el contexto para que el serializer funcione bien si usa 'request'
         serializer = self.get_serializer(caja, context={'request': request})
         return Response(serializer.data)
 
@@ -108,16 +104,14 @@ class CajaViewSet(viewsets.ModelViewSet):
         caja = self.get_object()
         
         monto_input = request.data.get('monto_real', 0)
-        caja.monto_final_real = Decimal(str(monto_input)) # Corregido nombre campo model
+        caja.monto_final_real = Decimal(str(monto_input))
         caja.comentarios = request.data.get('comentarios', '')
         
-        # Detalle de cierre opcional
         detalle_cierre = request.data.get('detalle_cierre', {})
         caja.detalle_cierre = json.dumps(detalle_cierre) if isinstance(detalle_cierre, dict) else str(detalle_cierre)
         
-        # Calculamos sistema al momento del cierre
         serializer = self.get_serializer(caja)
-        caja.monto_final_sistema = Decimal(str(serializer.data['saldo_actual'])) # Corregido nombre campo model
+        caja.monto_final_sistema = Decimal(str(serializer.data['saldo_actual']))
         
         caja.diferencia = caja.monto_final_real - caja.monto_final_sistema
         caja.estado = 'CERRADA'
@@ -130,13 +124,12 @@ class CajaViewSet(viewsets.ModelViewSet):
     def movimiento(self, request, pk=None):
         caja = self.get_object()
         
-        # Validar que la caja esté abierta para recibir movimientos
         if caja.estado != 'ABIERTA':
              return Response({'error': 'No se pueden agregar movimientos a una caja cerrada'}, status=400)
 
         MovimientoCaja.objects.create(
             caja=caja,
-            tipo=request.data.get('tipo'), # INGRESO / EGRESO
+            tipo=request.data.get('tipo'),
             monto=request.data.get('monto'),
             descripcion=request.data.get('descripcion'),
             categoria=request.data.get('categoria', 'GENERAL'),
@@ -146,9 +139,6 @@ class CajaViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def timeline(self, request, pk=None):
-        """
-        Retorna el 'Diario Electrónico' de la caja.
-        """
         caja = self.get_object()
         events = []
 
@@ -164,8 +154,7 @@ class CajaViewSet(viewsets.ModelViewSet):
             'estado': 'OK'
         })
         
-        # 2. Pagos (Ventas)
-        # Filtramos explícitamente por ID de caja para asegurar consistencia
+        # 2. Pagos
         pagos = Pago.objects.filter(caja=caja).select_related('ticket')
         for p in pagos:
             events.append({
@@ -177,15 +166,15 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'metodo': p.metodo_pago,
                 'usuario': p.creado_por.username if p.creado_por else 'Sistema',
                 'es_entrada': True,
-                'estado': p.estado # 'PAGADO' o 'ANULADO'
+                'estado': p.estado
             })
             
-        # 3. Movimientos (Ingresos/Egresos Manuales)
+        # 3. Movimientos
         movimientos = caja.movimientos_extra.all()
         for m in movimientos:
             events.append({
                 'id': f'mov-{m.id}',
-                'tipo_evento': m.tipo, # INGRESO / EGRESO
+                'tipo_evento': m.tipo,
                 'fecha': m.creado_en,
                 'monto': m.monto,
                 'descripcion': f'{m.categoria}: {m.descripcion}',
@@ -208,7 +197,6 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'estado': 'OK'
             })
 
-        # Ordenar por fecha, manejando posibles Nones (aunque no debería haber)
         events.sort(key=lambda x: x['fecha'] if x['fecha'] else timezone.now())
         
         return Response(events)

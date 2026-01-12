@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.utils import timezone
 from .models import Cliente, Ticket, TicketItem, EstadoHistorial
 
+# ... (Mantener ClienteSerializer, ClienteListSerializer, TicketItemSerializer, EstadoHistorialSerializer IGUALES) ...
 class ClienteSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.ReadOnlyField()
     total_gastado = serializers.ReadOnlyField()
@@ -31,6 +32,7 @@ class EstadoHistorialSerializer(serializers.ModelSerializer):
         model = EstadoHistorial
         fields = ['id', 'estado_anterior', 'estado_nuevo', 'fecha_cambio', 'usuario', 'usuario_nombre', 'comentario']
         read_only_fields = ['fecha_cambio']
+# ...
 
 class TicketSerializer(serializers.ModelSerializer):
     items = TicketItemSerializer(many=True, read_only=True)
@@ -68,6 +70,7 @@ class TicketListSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True)
     total = serializers.SerializerMethodField()
     saldo_pendiente = serializers.SerializerMethodField()
+    es_extornable = serializers.SerializerMethodField()
     
     class Meta:
         model = Ticket
@@ -75,15 +78,31 @@ class TicketListSerializer(serializers.ModelSerializer):
             'id', 'numero_ticket', 'cliente', 'cliente_nombre', 'estado',
             'prioridad', 'fecha_recepcion', 'fecha_prometida', 'total',
             'saldo_pendiente', 'activo',
-            'creado_en', 'actualizado_en' 
+            'creado_en', 'actualizado_en',
+            'es_extornable'
         ]
     
     def get_total(self, obj): return float(obj.calcular_total())
     def get_saldo_pendiente(self, obj): return float(obj.calcular_saldo_pendiente())
+    
+    def get_es_extornable(self, obj):
+        # Corrección: Usar localtime para la zona horaria de Perú
+        hoy = timezone.localtime(timezone.now()).date()
+        
+        # Intentamos obtener la relación con pagos, soportando 'pagos' o 'pago_set'
+        relacion_pagos = getattr(obj, 'pagos', getattr(obj, 'pago_set', None))
+        
+        if relacion_pagos:
+            # Filtramos en Python o DB, asegurando que la fecha del pago también se convierta a local
+            pagos_hoy = [
+                p for p in relacion_pagos.filter(estado='PAGADO') 
+                if timezone.localtime(p.fecha_pago).date() == hoy
+            ]
+            return len(pagos_hoy) > 0
+        return False
 
 class TicketCreateSerializer(serializers.ModelSerializer):
     items = TicketItemSerializer(many=True)
-    # Campos para pago inmediato
     pago_monto = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, write_only=True)
     metodo_pago = serializers.CharField(max_length=50, required=False, write_only=True)
 
@@ -104,34 +123,29 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         pago_monto = validated_data.pop('pago_monto', None)
         metodo_pago = validated_data.pop('metodo_pago', 'EFECTIVO')
         
-        # --- VALIDACIÓN CRÍTICA DE CAJA ---
-        # Si intenta pagar algo (monto > 0), validamos que tenga caja abierta.
         request = self.context.get('request')
         user = request.user if request else None
         caja_abierta = None
 
         if pago_monto is not None and float(pago_monto) > 0:
-            from pagos.models import CajaSesion # Importación lazy para evitar ciclos
+            from pagos.models import CajaSesion
             caja_abierta = CajaSesion.objects.filter(usuario=user, estado='ABIERTA').first()
             
             if not caja_abierta:
                 raise serializers.ValidationError({
-                    "error": "No tienes una caja abierta. Apertura caja para recibir pagos (Totales o Parciales). Solo puedes crear tickets PENDIENTES sin pago."
+                    "error": "No tienes una caja abierta. Apertura caja para recibir pagos."
                 })
 
-        # Crear Ticket
         ticket = Ticket.objects.create(**validated_data)
         
-        # Crear Items
         for item_data in items_data:
             TicketItem.objects.create(ticket=ticket, **item_data)
         
-        # Crear Pago si aplica
         if pago_monto is not None and float(pago_monto) > 0:
             from pagos.models import Pago
             Pago.objects.create(
                 ticket=ticket,
-                caja=caja_abierta, # <--- IMPORTANTE: VINCULAR A LA CAJA
+                caja=caja_abierta,
                 monto=pago_monto,
                 metodo_pago=metodo_pago,
                 estado='PAGADO',
