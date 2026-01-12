@@ -54,32 +54,48 @@ class CajaSesionSerializer(serializers.ModelSerializer):
         return Decimal(str(val)) if val is not None else Decimal('0.00')
 
     def get_total_gastos(self, obj):
+        # Total global de egresos (para scorecard)
         val = obj.movimientos_extra.filter(tipo='EGRESO').aggregate(Sum('monto'))['monto__sum']
         return Decimal(str(val)) if val is not None else Decimal('0.00')
 
     def get_total_efectivo(self, obj):
+        # 1. Ventas en Efectivo
         ventas_efectivo_val = obj.pagos_ticket.filter(estado='PAGADO', metodo_pago='EFECTIVO').aggregate(Sum('monto'))['monto__sum']
         ventas_efectivo = Decimal(str(ventas_efectivo_val)) if ventas_efectivo_val is not None else Decimal('0.00')
         
-        ingresos_extra_val = obj.movimientos_extra.filter(tipo='INGRESO').aggregate(Sum('monto'))['monto__sum']
+        # 2. Ingresos Manuales en Efectivo (CORREGIDO: filtrar por metodo)
+        ingresos_extra_val = obj.movimientos_extra.filter(tipo='INGRESO', metodo_pago='EFECTIVO').aggregate(Sum('monto'))['monto__sum']
         ingresos_extra = Decimal(str(ingresos_extra_val)) if ingresos_extra_val is not None else Decimal('0.00')
         
-        gastos = self.get_total_gastos(obj)
+        # 3. Gastos Manuales en Efectivo (CORREGIDO: filtrar por metodo)
+        gastos_efectivo_val = obj.movimientos_extra.filter(tipo='EGRESO', metodo_pago='EFECTIVO').aggregate(Sum('monto'))['monto__sum']
+        gastos_efectivo = Decimal(str(gastos_efectivo_val)) if gastos_efectivo_val is not None else Decimal('0.00')
+        
         monto_inicial = Decimal(str(obj.monto_inicial))
         
-        return monto_inicial + ventas_efectivo + ingresos_extra - gastos
+        return monto_inicial + ventas_efectivo + ingresos_extra - gastos_efectivo
 
     def get_total_digital(self, obj):
+        # 1. Ventas Digitales
         ventas_digital_val = obj.pagos_ticket.filter(estado='PAGADO').exclude(metodo_pago='EFECTIVO').aggregate(Sum('monto'))['monto__sum']
         ventas_digital = Decimal(str(ventas_digital_val)) if ventas_digital_val is not None else Decimal('0.00')
         
+        # 2. Apertura Digital (Saldos iniciales en cuentas)
         apertura = self._get_apertura_dict(obj)
         saldo_inicial_digital = Decimal('0.00')
         for metodo, monto in apertura.items():
             if metodo != 'EFECTIVO':
                 saldo_inicial_digital += Decimal(str(monto or 0))
+
+        # 3. Ingresos Manuales Digitales (CORREGIDO)
+        ingresos_digital_val = obj.movimientos_extra.filter(tipo='INGRESO').exclude(metodo_pago='EFECTIVO').aggregate(Sum('monto'))['monto__sum']
+        ingresos_digital = Decimal(str(ingresos_digital_val)) if ingresos_digital_val is not None else Decimal('0.00')
+
+        # 4. Gastos Manuales Digitales (CORREGIDO)
+        gastos_digital_val = obj.movimientos_extra.filter(tipo='EGRESO').exclude(metodo_pago='EFECTIVO').aggregate(Sum('monto'))['monto__sum']
+        gastos_digital = Decimal(str(gastos_digital_val)) if gastos_digital_val is not None else Decimal('0.00')
                 
-        return ventas_digital + saldo_inicial_digital
+        return ventas_digital + saldo_inicial_digital + ingresos_digital - gastos_digital
 
     def get_saldo_actual(self, obj):
         return self.get_total_efectivo(obj) + self.get_total_digital(obj)
@@ -90,21 +106,24 @@ class CajaSesionSerializer(serializers.ModelSerializer):
         apertura = self._get_apertura_dict(obj)
         
         for m in metodos:
+            # Ventas
             val_ventas = obj.pagos_ticket.filter(estado='PAGADO', metodo_pago=m).aggregate(Sum('monto'))['monto__sum']
             total_ventas = Decimal(str(val_ventas)) if val_ventas is not None else Decimal('0.00')
             
+            # Saldo Inicial
             if m == 'EFECTIVO':
                 saldo_inicial = Decimal(str(obj.monto_inicial))
             else:
                 saldo_inicial = Decimal(str(apertura.get(m, 0)))
             
-            total = saldo_inicial + total_ventas
+            # Movimientos Manuales (Ingresos - Egresos para este método específico)
+            val_ingresos = obj.movimientos_extra.filter(tipo='INGRESO', metodo_pago=m).aggregate(Sum('monto'))['monto__sum']
+            ingresos_extra = Decimal(str(val_ingresos)) if val_ingresos is not None else Decimal('0.00')
+            
+            val_gastos = obj.movimientos_extra.filter(tipo='EGRESO', metodo_pago=m).aggregate(Sum('monto'))['monto__sum']
+            gastos_extra = Decimal(str(val_gastos)) if val_gastos is not None else Decimal('0.00')
 
-            if m == 'EFECTIVO':
-                val_ingresos = obj.movimientos_extra.filter(tipo='INGRESO').aggregate(Sum('monto'))['monto__sum']
-                ingresos_extra = Decimal(str(val_ingresos)) if val_ingresos is not None else Decimal('0.00')
-                gastos = self.get_total_gastos(obj)
-                total = total + ingresos_extra - gastos
+            total = saldo_inicial + total_ventas + ingresos_extra - gastos_extra
             
             desglose[m] = total
             

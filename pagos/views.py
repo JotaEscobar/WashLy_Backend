@@ -62,6 +62,78 @@ class CajaViewSet(viewsets.ModelViewSet):
             
         return queryset
 
+    # Helper para construir timeline de una caja específica (para cuando se consulta una sesión cerrada antigua)
+    def _build_timeline_events(self, caja):
+        events = []
+        def safe_json(val):
+            try: return json.loads(val) if val else {}
+            except: return {}
+
+        # 1. Apertura
+        events.append({
+            'id': f'apertura-{caja.id}',
+            'hora_raw': caja.fecha_apertura,
+            'tipo_evento': 'APERTURA',
+            'fecha': caja.fecha_apertura,
+            'monto': caja.monto_inicial,
+            'descripcion': f'Apertura de Caja (ID: {caja.id})',
+            'usuario': caja.usuario.username,
+            'es_entrada': True,
+            'estado': 'OK',
+            'detalles': safe_json(caja.detalle_apertura) 
+        })
+        
+        # 2. Pagos
+        pagos = Pago.objects.filter(caja=caja).select_related('ticket')
+        for p in pagos:
+            desc = f"Pago Ticket #{p.ticket.numero_ticket}"
+            if p.estado == 'ANULADO':
+                desc += " (ANULADO)"
+            events.append({
+                'id': f'pago-{p.id}',
+                'hora_raw': p.fecha_pago,
+                'tipo_evento': 'VENTA',
+                'fecha': p.fecha_pago,
+                'monto': p.monto,
+                'descripcion': desc,
+                'usuario': p.creado_por.username if p.creado_por else 'Sistema',
+                'es_entrada': True,
+                'estado': p.estado,
+                'detalles': {'MÉTODO': p.metodo_pago, 'TICKET': p.ticket.numero_ticket}
+            })
+            
+        # 3. Movimientos
+        movimientos = caja.movimientos_extra.all()
+        for m in movimientos:
+            events.append({
+                'id': f'mov-{m.id}',
+                'hora_raw': m.creado_en,
+                'tipo_evento': m.tipo,
+                'fecha': m.creado_en,
+                'monto': m.monto,
+                'descripcion': f"{m.categoria}: {m.descripcion}", 
+                'usuario': m.creado_por.username if m.creado_por else 'Sistema',
+                'es_entrada': m.tipo == 'INGRESO',
+                'estado': 'OK',
+                'detalles': {'CATEGORÍA': m.categoria, 'MÉTODO': m.metodo_pago, 'NOTA': m.descripcion}
+            })
+            
+        # 4. Cierre
+        if caja.fecha_cierre and caja.estado == 'CERRADA':
+             events.append({
+                'id': f'cierre-{caja.id}',
+                'hora_raw': caja.fecha_cierre,
+                'tipo_evento': 'CIERRE',
+                'fecha': caja.fecha_cierre,
+                'monto': caja.monto_final_real or 0,
+                'descripcion': f'Cierre de Caja (Dif: {caja.diferencia})',
+                'usuario': caja.usuario.username,
+                'es_entrada': None, 
+                'estado': 'OK',
+                'detalles': safe_json(caja.detalle_cierre)
+            })
+        return events
+
     @action(detail=False, methods=['get'])
     def mi_caja(self, request):
         caja = CajaSesion.objects.filter(usuario=request.user, estado='ABIERTA').first()
@@ -72,22 +144,11 @@ class CajaViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def ultimo_cierre(self, request):
         ultima_caja = CajaSesion.objects.filter(estado='CERRADA').order_by('-fecha_cierre').first()
-        
-        if not ultima_caja:
-            return Response(None)
-            
+        if not ultima_caja: return Response(None)
         detalle = {}
-        try:
-            detalle = json.loads(ultima_caja.detalle_cierre) if ultima_caja.detalle_cierre else {}
-        except:
-            detalle = {}
-        
-        efectivo_real = detalle.get('EFECTIVO', 0)
-            
-        return Response({
-            'EFECTIVO': efectivo_real,
-            'detalle': detalle
-        })
+        try: detalle = json.loads(ultima_caja.detalle_cierre) if ultima_caja.detalle_cierre else {}
+        except: detalle = {}
+        return Response({'EFECTIVO': detalle.get('EFECTIVO', 0), 'detalle': detalle})
 
     @action(detail=False, methods=['post'])
     def abrir(self, request):
@@ -103,51 +164,37 @@ class CajaViewSet(viewsets.ModelViewSet):
             detalle_apertura=json.dumps(detalle) if isinstance(detalle, dict) else str(detalle),
             estado='ABIERTA'
         )
-        
         serializer = self.get_serializer(caja, context={'request': request})
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
     def cerrar(self, request, pk=None):
         caja = self.get_object()
-        
-        monto_input = request.data.get('monto_real', 0)
-        caja.monto_final_real = Decimal(str(monto_input))
+        caja.monto_final_real = Decimal(str(request.data.get('monto_real', 0)))
         caja.comentarios = request.data.get('comentarios', '')
-        
-        detalle_cierre = request.data.get('detalle_cierre', {})
-        caja.detalle_cierre = json.dumps(detalle_cierre) if isinstance(detalle_cierre, dict) else str(detalle_cierre)
+        detalle = request.data.get('detalle_cierre', {})
+        caja.detalle_cierre = json.dumps(detalle) if isinstance(detalle, dict) else str(detalle)
         
         serializer = self.get_serializer(caja)
         caja.monto_final_sistema = Decimal(str(serializer.data['saldo_actual']))
-        
         caja.diferencia = caja.monto_final_real - caja.monto_final_sistema
         caja.estado = 'CERRADA'
         caja.fecha_cierre = timezone.now()
         caja.save()
-        
         return Response(self.get_serializer(caja).data)
 
     @action(detail=True, methods=['post'])
     def movimiento(self, request, pk=None):
         caja = self.get_object()
-        
         if caja.estado != 'ABIERTA':
-             return Response({'error': 'No se pueden agregar movimientos a una caja cerrada'}, status=400)
-
-        # Capturamos datos extendidos
-        descripcion_raw = request.data.get('descripcion', '')
-        metodo_pago = request.data.get('metodo_pago', 'EFECTIVO')
-        
-        # Guardamos el metodo en la descripción para persistencia simple si el modelo no tiene el campo
-        # (Esto asegura compatibilidad sin migraciones complejas inmediatas)
-        descripcion_final = f"{descripcion_raw} | Método: {metodo_pago}"
+             return Response({'error': 'Caja cerrada'}, status=400)
 
         MovimientoCaja.objects.create(
             caja=caja,
             tipo=request.data.get('tipo'),
             monto=request.data.get('monto'),
-            descripcion=descripcion_final, 
+            metodo_pago=request.data.get('metodo_pago', 'EFECTIVO'),
+            descripcion=request.data.get('descripcion', ''), 
             categoria=request.data.get('categoria', 'GENERAL'),
             creado_por=request.user
         )
@@ -156,81 +203,106 @@ class CajaViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def timeline(self, request, pk=None):
         caja = self.get_object()
-        events = []
+        events = self._build_timeline_events(caja)
+        events.sort(key=lambda x: x['hora_raw'] if x['hora_raw'] else timezone.now())
+        return Response(events)
 
-        # Helper para parsear JSON seguro
+    # --- DIARIO CONSOLIDADO (CORREGIDO) ---
+    @action(detail=False, methods=['get'])
+    def diario(self, request):
+        fecha_desde = request.query_params.get('fecha_desde')
+        fecha_hasta = request.query_params.get('fecha_hasta')
+        
+        if not fecha_desde: fecha_desde = timezone.localtime(timezone.now()).date()
+        if not fecha_hasta: fecha_hasta = timezone.localtime(timezone.now()).date()
+
+        events = []
         def safe_json(val):
             try: return json.loads(val) if val else {}
             except: return {}
 
-        # 1. Apertura
-        events.append({
-            'id': f'apertura-{caja.id}',
-            'hora_raw': caja.fecha_apertura,
-            'tipo_evento': 'APERTURA',
-            'fecha': caja.fecha_apertura,
-            'monto': caja.monto_inicial,
-            'descripcion': 'Saldo Inicial de Caja',
-            'usuario': caja.usuario.username,
-            'es_entrada': True,
-            'estado': 'OK',
-            'detalles': safe_json(caja.detalle_apertura) # Para el modal del ojo
-        })
+        # 1. Pagos por Fecha
+        pagos = Pago.objects.filter(
+            fecha_pago__date__gte=fecha_desde, 
+            fecha_pago__date__lte=fecha_hasta
+        ).select_related('ticket', 'creado_por')
         
-        # 2. Pagos (Ventas)
-        pagos = Pago.objects.filter(caja=caja).select_related('ticket')
         for p in pagos:
+            desc = f"Pago Ticket #{p.ticket.numero_ticket}"
+            if p.estado == 'ANULADO': desc += " (ANULADO)"
             events.append({
                 'id': f'pago-{p.id}',
                 'hora_raw': p.fecha_pago,
                 'tipo_evento': 'VENTA',
                 'fecha': p.fecha_pago,
                 'monto': p.monto,
-                'descripcion': f'Ticket #{p.ticket.numero_ticket}',
-                'metodo': p.metodo_pago,
+                'descripcion': desc,
                 'usuario': p.creado_por.username if p.creado_por else 'Sistema',
                 'es_entrada': True,
-                'estado': p.estado,
+                'estado': p.estado, 
                 'detalles': {'MÉTODO': p.metodo_pago, 'TICKET': p.ticket.numero_ticket, 'CLIENTE': str(p.ticket.cliente_info)}
             })
-            
-        # 3. Movimientos (Ingresos/Gastos)
-        movimientos = caja.movimientos_extra.all()
-        for m in movimientos:
-            # Intentamos extraer el metodo de la descripción si fue guardado con el formato nuevo
-            desc_parts = m.descripcion.split('| Método:')
-            texto_desc = desc_parts[0].strip()
-            metodo_desc = desc_parts[1].strip() if len(desc_parts) > 1 else 'EFECTIVO'
 
+        # 2. Movimientos por Fecha
+        movimientos = MovimientoCaja.objects.filter(
+            creado_en__date__gte=fecha_desde,
+            creado_en__date__lte=fecha_hasta
+        ).select_related('creado_por')
+        
+        for m in movimientos:
             events.append({
                 'id': f'mov-{m.id}',
                 'hora_raw': m.creado_en,
-                'tipo_evento': m.tipo, # INGRESO o EGRESO
+                'tipo_evento': m.tipo, 
                 'fecha': m.creado_en,
                 'monto': m.monto,
-                'descripcion': f"{m.categoria}: {texto_desc}", 
+                'descripcion': f"{m.categoria}: {m.descripcion}", 
                 'usuario': m.creado_por.username if m.creado_por else 'Sistema',
                 'es_entrada': m.tipo == 'INGRESO',
                 'estado': 'OK',
-                'detalles': {'CATEGORÍA': m.categoria, 'MÉTODO': metodo_desc, 'NOTA': texto_desc}
-            })
-            
-        # 4. Cierre
-        if caja.fecha_cierre and caja.estado == 'CERRADA':
-             events.append({
-                'id': f'cierre-{caja.id}',
-                'hora_raw': caja.fecha_cierre,
-                'tipo_evento': 'CIERRE',
-                'fecha': caja.fecha_cierre,
-                'monto': caja.monto_final_real or 0,
-                'descripcion': f'Arqueo Final (Dif: {caja.diferencia})',
-                'usuario': caja.usuario.username,
-                'es_entrada': None, 
-                'estado': 'OK',
-                'detalles': safe_json(caja.detalle_cierre)
+                'detalles': {'CATEGORÍA': m.categoria, 'MÉTODO': m.metodo_pago, 'NOTA': m.descripcion}
             })
 
-        # Ordenar cronológicamente
+        # 3. Aperturas por Fecha
+        aperturas = CajaSesion.objects.filter(
+            fecha_apertura__date__gte=fecha_desde,
+            fecha_apertura__date__lte=fecha_hasta
+        ).select_related('usuario')
+
+        for c in aperturas:
+            events.append({
+                'id': f'apertura-{c.id}',
+                'hora_raw': c.fecha_apertura,
+                'tipo_evento': 'APERTURA',
+                'fecha': c.fecha_apertura,
+                'monto': c.monto_inicial,
+                'descripcion': f'Apertura de Caja',
+                'usuario': c.usuario.username,
+                'es_entrada': True,
+                'estado': 'OK',
+                'detalles': safe_json(c.detalle_apertura) 
+            })
+
+        # 4. Cierres por Fecha
+        cierres = CajaSesion.objects.filter(
+            fecha_cierre__date__gte=fecha_desde,
+            fecha_cierre__date__lte=fecha_hasta,
+            estado='CERRADA'
+        ).select_related('usuario')
+
+        for c in cierres:
+             events.append({
+                'id': f'cierre-{c.id}',
+                'hora_raw': c.fecha_cierre,
+                'tipo_evento': 'CIERRE',
+                'fecha': c.fecha_cierre,
+                'monto': c.monto_final_real or 0,
+                'descripcion': f'Cierre de Caja',
+                'usuario': c.usuario.username,
+                'es_entrada': None, 
+                'estado': 'OK',
+                'detalles': safe_json(c.detalle_cierre)
+            })
+
         events.sort(key=lambda x: x['hora_raw'] if x['hora_raw'] else timezone.now())
-        
         return Response(events)
