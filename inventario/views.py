@@ -1,10 +1,10 @@
 from rest_framework import viewsets, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from .models import CategoriaProducto, Producto, MovimientoInventario
+from .models import CategoriaProducto, Producto, MovimientoInventario, AlertaStock
 from .serializers import (
     CategoriaProductoSerializer, ProductoSerializer,
-    MovimientoInventarioSerializer
+    MovimientoInventarioSerializer, AlertaStockSerializer
 )
 
 class CategoriaProductoViewSet(viewsets.ModelViewSet):
@@ -32,3 +32,7 @@ class MovimientoInventarioViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         serializer.save(creado_por=self.request.user)
+
+class AlertaStockViewSet(viewsets.ModelViewSet):
+    queryset = AlertaStock.objects.all().order_by('-fecha')
+    serializer_class = AlertaStockSerializer

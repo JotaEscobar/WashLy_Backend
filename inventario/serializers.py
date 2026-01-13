@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import CategoriaProducto, Producto, MovimientoInventario
+from .models import CategoriaProducto, Producto, MovimientoInventario, AlertaStock
 
 class CategoriaProductoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -42,3 +42,21 @@ class MovimientoInventarioSerializer(serializers.ModelSerializer):
             'motivo', 'costo_unitario', 'creado_en', 'usuario'
         ]
         read_only_fields = ['stock_anterior', 'stock_nuevo', 'creado_en']
+
+    def validate(self, data):
+        """Validación para asegurar que hay stock suficiente antes de guardar"""
+        if data.get('tipo') == 'CONSUMO':
+            producto = data.get('producto')
+            cantidad = data.get('cantidad')
+            if producto and cantidad and producto.stock_actual < cantidad:
+                raise serializers.ValidationError({
+                    "cantidad": f"Stock insuficiente. Disponible: {producto.stock_actual} {producto.unidad_medida}"
+                })
+        return data
+
+class AlertaStockSerializer(serializers.ModelSerializer):
+    producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
+
+    class Meta:
+        model = AlertaStock
+        fields = ['id', 'producto', 'producto_nombre', 'mensaje', 'fecha']
