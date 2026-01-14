@@ -12,16 +12,12 @@ from pagos.models import Pago, CajaSesion
 from inventario.models import Producto
 
 class DashboardKPIView(APIView):
-    """
-    Endpoint Nivel 1: Signos Vitales (Carga Inmediata)
-    Incluye lógica de Caja, Ventas, Deuda y Alertas (Inc. Stock Bajo).
-    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         hoy = timezone.now().date()
         
-        # 1. CAJA ACTUAL
+        # 1. CAJA ACTUAL (Desglose exacto)
         caja_sesion = CajaSesion.objects.filter(usuario=request.user, estado='ABIERTA').first()
         saldo_caja = {'total': 0, 'efectivo': 0, 'digital': 0, 'tiene_caja': False}
         
@@ -33,8 +29,10 @@ class DashboardKPIView(APIView):
             # Sumatorias
             v_efec = pagos.filter(metodo_pago='EFECTIVO').aggregate(t=Sum('monto'))['t'] or 0
             v_dig = pagos.exclude(metodo_pago='EFECTIVO').aggregate(t=Sum('monto'))['t'] or 0
+            
             i_efec = movs.filter(tipo='INGRESO', metodo_pago='EFECTIVO').aggregate(t=Sum('monto'))['t'] or 0
             i_dig = movs.filter(tipo='INGRESO').exclude(metodo_pago='EFECTIVO').aggregate(t=Sum('monto'))['t'] or 0
+            
             e_efec = movs.filter(tipo='EGRESO', metodo_pago='EFECTIVO').aggregate(t=Sum('monto'))['t'] or 0
             e_dig = movs.filter(tipo='EGRESO').exclude(metodo_pago='EFECTIVO').aggregate(t=Sum('monto'))['t'] or 0
 
@@ -42,10 +40,10 @@ class DashboardKPIView(APIView):
             saldo_caja['digital'] = float(v_dig + i_dig - e_dig)
             saldo_caja['total'] = saldo_caja['efectivo'] + saldo_caja['digital']
 
-        # 2. KPI: VENTAS HOY
+        # 2. VENTAS HOY
         ventas_hoy = Pago.objects.filter(fecha_pago__date=hoy, estado='PAGADO').aggregate(t=Sum('monto'))['t'] or 0
 
-        # 3. KPI: POR COBRAR (Deuda)
+        # 3. POR COBRAR
         val_servicios = TicketItem.objects.filter(
             ticket__activo=True,
             ticket__estado__in=['RECIBIDO', 'EN_PROCESO', 'LISTO', 'ENTREGADO']
@@ -57,14 +55,12 @@ class DashboardKPIView(APIView):
         
         deuda = max(0, val_servicios - pagado_tickets)
 
-        # 4. KPI: CARGA OPERATIVA
+        # 4. CARGA OPERATIVA
         carga = Ticket.objects.filter(estado__in=['RECIBIDO', 'EN_PROCESO'], activo=True).count()
 
         # 5. ALERTAS
         vencidos = Ticket.objects.filter(fecha_prometida__lt=timezone.now(), estado__in=['RECIBIDO', 'EN_PROCESO', 'LISTO'], activo=True).count()
         urgentes = Ticket.objects.filter(prioridad__in=['URGENTE', 'EXPRESS'], estado__in=['RECIBIDO', 'EN_PROCESO'], activo=True).count()
-        
-        # Alerta Stock Bajo (Insumos)
         stock_bajo = Producto.objects.filter(activo=True, stock_actual__lte=F('stock_minimo')).count()
 
         return Response({
@@ -82,12 +78,7 @@ class DashboardKPIView(APIView):
         })
 
 class DashboardOperativoView(APIView):
-    """
-    Endpoint Nivel 2: Tablero Operativo (Pipeline)
-    Optimizado: Se eliminó 'proximas_entregas' para reducir carga.
-    """
     permission_classes = [IsAuthenticated]
-
     def get(self, request):
         conteo = Ticket.objects.filter(activo=True).aggregate(
             recibidos=Count('id', filter=Q(estado='RECIBIDO')),
@@ -98,34 +89,27 @@ class DashboardOperativoView(APIView):
         return Response({'pipeline': conteo})
 
 class DashboardAnaliticaView(APIView):
-    """
-    Endpoint Nivel 3: Inteligencia de Negocio
-    (Sin cambios mayores, lógica de gráficos se mantiene)
-    """
     permission_classes = [IsAuthenticated]
-
     def get(self, request):
         fecha_fin = timezone.now().date()
         fecha_inicio = fecha_fin - timedelta(days=30)
-
-        # 1. Ventas
+        
+        # Tendencia
         ventas = Pago.objects.filter(estado='PAGADO', fecha_pago__date__gte=fecha_inicio).annotate(dia=TruncDate('fecha_pago')).values('dia').annotate(total=Sum('monto')).order_by('dia')
         datos_ventas = [{'fecha': v['dia'].strftime('%Y-%m-%d'), 'total': float(v['total'])} for v in ventas]
         promedio = sum(d['total'] for d in datos_ventas) / len(datos_ventas) if datos_ventas else 0
 
-        # 2. Top Servicios
+        # Servicios (Nombre claro para leyenda)
         servicios = TicketItem.objects.filter(ticket__fecha_recepcion__date__gte=fecha_inicio).values('servicio__nombre').annotate(total=Sum(F('cantidad')*F('precio_unitario'))).order_by('-total')[:5]
-        datos_servicios = [{'nombre': s['servicio__nombre'], 'total': float(s['total'] or 0)} for s in servicios]
+        datos_servicios = [{'name': s['servicio__nombre'], 'value': float(s['total'] or 0)} for s in servicios]
 
-        # 3. Heatmap
+        # Heatmap
         tickets_h = Ticket.objects.filter(fecha_recepcion__date__gte=fecha_inicio).annotate(d=ExtractWeekDay('fecha_recepcion'), h=ExtractHour('fecha_recepcion')).values('d', 'h').annotate(c=Count('id'))
-        
-        # Inicializar matriz 7 días
         dias_lbl = ['DOM', 'LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB']
         heatmap = [{'dia': d, 'manana': 0, 'tarde': 0, 'noche': 0} for d in dias_lbl]
         
         for item in tickets_h:
-            idx = item['d'] - 1 # Django: 1=Dom
+            idx = item['d'] - 1 
             if 0 <= idx <= 6:
                 h, c = item['h'], item['c']
                 if 6 <= h < 12: heatmap[idx]['manana'] += c
