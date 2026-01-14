@@ -2,9 +2,9 @@ from rest_framework import viewsets, filters, serializers, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.utils import timezone
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 import json
-
 from .models import Pago, CajaSesion, MovimientoCaja
 from .serializers import PagoSerializer, CajaSesionSerializer, MovimientoCajaSerializer
 
@@ -31,7 +31,11 @@ class PagoViewSet(viewsets.ModelViewSet):
     def anular(self, request, pk=None):
         pago = self.get_object()
         
-        if pago.fecha_pago.date() != timezone.now().date():
+        # Validar fecha con timezone local para evitar errores de UTC
+        now_local = timezone.localtime(timezone.now())
+        pago_local = timezone.localtime(pago.fecha_pago)
+        
+        if pago_local.date() != now_local.date():
             return Response(
                 {'error': 'Solo se pueden extornar pagos realizados el día de hoy.'}, 
                 status=400
@@ -55,14 +59,20 @@ class CajaViewSet(viewsets.ModelViewSet):
         fecha_desde = self.request.query_params.get('fecha_desde')
         fecha_hasta = self.request.query_params.get('fecha_hasta')
         
+        # Filtrado robusto con Timezone Aware (Perú)
         if fecha_desde:
-            queryset = queryset.filter(fecha_apertura__date__gte=fecha_desde)
+            dt_start = datetime.strptime(fecha_desde, '%Y-%m-%d').date()
+            start_aware = timezone.make_aware(datetime.combine(dt_start, time.min))
+            queryset = queryset.filter(fecha_apertura__gte=start_aware)
+            
         if fecha_hasta:
-            queryset = queryset.filter(fecha_apertura__date__lte=fecha_hasta)
+            dt_end = datetime.strptime(fecha_hasta, '%Y-%m-%d').date()
+            end_aware = timezone.make_aware(datetime.combine(dt_end, time.max))
+            queryset = queryset.filter(fecha_apertura__lte=end_aware)
             
         return queryset
 
-    # Helper para construir timeline de una caja específica (para cuando se consulta una sesión cerrada antigua)
+    # Helper para construir timeline de una caja específica
     def _build_timeline_events(self, caja):
         events = []
         def safe_json(val):
@@ -70,6 +80,14 @@ class CajaViewSet(viewsets.ModelViewSet):
             except: return {}
 
         # 1. Apertura
+        apertura_detalle = safe_json(caja.detalle_apertura)
+        # Agregar EFECTIVO al detalle si no está
+        if 'EFECTIVO' not in apertura_detalle:
+            apertura_detalle['EFECTIVO'] = float(caja.monto_inicial)
+        # Agregar comentarios si existen
+        if caja.comentarios:
+            apertura_detalle['COMENTARIOS'] = caja.comentarios
+            
         events.append({
             'id': f'apertura-{caja.id}',
             'hora_raw': caja.fecha_apertura,
@@ -80,15 +98,21 @@ class CajaViewSet(viewsets.ModelViewSet):
             'usuario': caja.usuario.username,
             'es_entrada': True,
             'estado': 'OK',
-            'detalles': safe_json(caja.detalle_apertura) 
+            'detalles': apertura_detalle
         })
         
         # 2. Pagos
-        pagos = Pago.objects.filter(caja=caja).select_related('ticket')
+        pagos = Pago.objects.filter(caja=caja).select_related('ticket', 'ticket__cliente')
         for p in pagos:
             desc = f"Pago Ticket #{p.ticket.numero_ticket}"
             if p.estado == 'ANULADO':
                 desc += " (ANULADO)"
+            
+            # Obtener nombre del cliente
+            cliente_nombre = "N/A"
+            if hasattr(p.ticket, 'cliente') and p.ticket.cliente:
+                cliente_nombre = f"{p.ticket.cliente.nombres} {p.ticket.cliente.apellidos}".strip()
+            
             events.append({
                 'id': f'pago-{p.id}',
                 'hora_raw': p.fecha_pago,
@@ -99,28 +123,36 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'usuario': p.creado_por.username if p.creado_por else 'Sistema',
                 'es_entrada': True,
                 'estado': p.estado,
-                'detalles': {'MÉTODO': p.metodo_pago, 'TICKET': p.ticket.numero_ticket}
+                'detalles': {'MÉTODO': p.metodo_pago, 'TICKET': p.ticket.numero_ticket, 'CLIENTE': cliente_nombre}
             })
             
         # 3. Movimientos
         movimientos = caja.movimientos_extra.all()
         for m in movimientos:
+            # Especificar claramente si es Gasto o Ingreso en la descripción
+            tipo_texto = "Gasto" if m.tipo == 'EGRESO' else "Ingreso"
+            desc = f"{tipo_texto} - {m.categoria}: {m.descripcion}"
+            
             events.append({
                 'id': f'mov-{m.id}',
                 'hora_raw': m.creado_en,
                 'tipo_evento': m.tipo,
                 'fecha': m.creado_en,
                 'monto': m.monto,
-                'descripcion': f"{m.categoria}: {m.descripcion}", 
+                'descripcion': desc,
                 'usuario': m.creado_por.username if m.creado_por else 'Sistema',
                 'es_entrada': m.tipo == 'INGRESO',
                 'estado': 'OK',
-                'detalles': {'CATEGORÍA': m.categoria, 'MÉTODO': m.metodo_pago, 'NOTA': m.descripcion}
+                'detalles': {'TIPO': tipo_texto.upper(), 'CATEGORÍA': m.categoria, 'MÉTODO': m.metodo_pago, 'NOTA': m.descripcion}
             })
             
         # 4. Cierre
         if caja.fecha_cierre and caja.estado == 'CERRADA':
-             events.append({
+            cierre_detalle = safe_json(caja.detalle_cierre)
+            # Excluir TRANSFERENCIA del detalle de cierre
+            cierre_detalle_filtrado = {k: v for k, v in cierre_detalle.items() if k != 'TRANSFERENCIA'}
+            
+            events.append({
                 'id': f'cierre-{caja.id}',
                 'hora_raw': caja.fecha_cierre,
                 'tipo_evento': 'CIERRE',
@@ -130,7 +162,7 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'usuario': caja.usuario.username,
                 'es_entrada': None, 
                 'estado': 'OK',
-                'detalles': safe_json(caja.detalle_cierre)
+                'detalles': cierre_detalle_filtrado
             })
         return events
 
@@ -207,29 +239,99 @@ class CajaViewSet(viewsets.ModelViewSet):
         events.sort(key=lambda x: x['hora_raw'] if x['hora_raw'] else timezone.now())
         return Response(events)
 
-    # --- DIARIO CONSOLIDADO (CORREGIDO) ---
+    # =============================================================================
+    # DIARIO CONSOLIDADO - VERSIÓN CORREGIDA PARA WASHLY
+    # =============================================================================
+    # Problema identificado: El uso de __range con time.max causaba problemas
+    # con la zona horaria America/Lima cuando los registros se creaban cerca de
+    # la medianoche. Los registros no aparecían porque el timestamp en UTC caía
+    # fuera del rango de búsqueda.
+    # 
+    # Solución implementada:
+    # 1. Cambiar de __range a __gte y __lte para mayor control
+    # 2. Calcular correctamente el fin del día usando timedelta
+    # 3. Agregar logs de debugging para diagnóstico
+    # =============================================================================
+    
     @action(detail=False, methods=['get'])
     def diario(self, request):
-        fecha_desde = request.query_params.get('fecha_desde')
-        fecha_hasta = request.query_params.get('fecha_hasta')
+        """
+        Endpoint que retorna el historial consolidado de movimientos de caja
+        filtrado por rango de fechas. Incluye:
+        - Pagos de tickets
+        - Movimientos manuales (ingresos/gastos)
+        - Aperturas de caja
+        - Cierres de caja
+        """
+        fecha_desde_str = request.query_params.get('fecha_desde')
+        fecha_hasta_str = request.query_params.get('fecha_hasta')
         
-        if not fecha_desde: fecha_desde = timezone.localtime(timezone.now()).date()
-        if not fecha_hasta: fecha_hasta = timezone.localtime(timezone.now()).date()
+        # 1. Obtener fecha base en Hora Local (America/Lima)
+        now_local = timezone.localtime(timezone.now())
+        
+        # Determinar rango de fechas (por defecto: hoy)
+        if fecha_desde_str:
+            dt_start = datetime.strptime(fecha_desde_str, '%Y-%m-%d').date()
+        else:
+            dt_start = now_local.date()
 
+        if fecha_hasta_str:
+            dt_end = datetime.strptime(fecha_hasta_str, '%Y-%m-%d').date()
+        else:
+            dt_end = now_local.date()
+
+        # 2. Construir rango timezone-aware correcto
+        # IMPORTANTE: No usar time.max (23:59:59.999999) porque causa problemas
+        # con la conversión de zonas horarias. En su lugar, usar el inicio del
+        # día siguiente menos 1 microsegundo.
+        
+        # Inicio del día en hora local
+        start_naive = datetime.combine(dt_start, time.min)  # 00:00:00
+        start_aware = timezone.make_aware(start_naive)
+        
+        # Fin del día = inicio del día siguiente - 1 microsegundo
+        # Esto captura todo hasta las 23:59:59.999999 sin problemas de timezone
+        end_naive = datetime.combine(dt_end + timedelta(days=1), time.min) - timedelta(microseconds=1)
+        end_aware = timezone.make_aware(end_naive)
+
+        # Lista para almacenar todos los eventos
         events = []
+        
+        # Helper para parsear JSON de forma segura
         def safe_json(val):
-            try: return json.loads(val) if val else {}
-            except: return {}
+            try: 
+                return json.loads(val) if val else {}
+            except: 
+                return {}
 
-        # 1. Pagos por Fecha
+        # DEBUG: Log del rango de búsqueda (útil para diagnóstico)
+        # Puedes comentar estas líneas en producción si no las necesitas
+        print(f"[DIARIO] Buscando movimientos desde {start_aware} hasta {end_aware}")
+        print(f"[DIARIO] Zona horaria: {timezone.get_current_timezone()}")
+
+        # =======================================================================
+        # 3. BUSCAR PAGOS DE TICKETS
+        # =======================================================================
+        # CAMBIO CRÍTICO: Usar __gte y __lte en lugar de __range
+        # Esto da mayor control y evita problemas de límites con zonas horarias
         pagos = Pago.objects.filter(
-            fecha_pago__date__gte=fecha_desde, 
-            fecha_pago__date__lte=fecha_hasta
-        ).select_related('ticket', 'creado_por')
+            fecha_pago__gte=start_aware,
+            fecha_pago__lte=end_aware
+        ).select_related('ticket', 'creado_por', 'ticket__cliente')
+        
+        print(f"[DIARIO] Pagos encontrados: {pagos.count()}")
         
         for p in pagos:
             desc = f"Pago Ticket #{p.ticket.numero_ticket}"
-            if p.estado == 'ANULADO': desc += " (ANULADO)"
+            if p.estado == 'ANULADO': 
+                desc += " (ANULADO)"
+            
+            # Obtener nombre del cliente
+            cliente_nombre = "N/A"
+            if hasattr(p.ticket, 'cliente') and p.ticket.cliente:
+                cliente_nombre = f"{p.ticket.cliente.nombres} {p.ticket.cliente.apellidos}".strip()
+            
+            # Construir objeto de evento
             events.append({
                 'id': f'pago-{p.id}',
                 'hora_raw': p.fecha_pago,
@@ -239,37 +341,66 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'descripcion': desc,
                 'usuario': p.creado_por.username if p.creado_por else 'Sistema',
                 'es_entrada': True,
-                'estado': p.estado, 
-                'detalles': {'MÉTODO': p.metodo_pago, 'TICKET': p.ticket.numero_ticket, 'CLIENTE': str(p.ticket.cliente_info)}
+                'estado': p.estado,
+                'detalles': {
+                    'MÉTODO': p.metodo_pago,
+                    'TICKET': p.ticket.numero_ticket,
+                    'CLIENTE': cliente_nombre
+                }
             })
 
-        # 2. Movimientos por Fecha
+        # =======================================================================
+        # 4. BUSCAR MOVIMIENTOS MANUALES (INGRESOS/GASTOS)
+        # =======================================================================
         movimientos = MovimientoCaja.objects.filter(
-            creado_en__date__gte=fecha_desde,
-            creado_en__date__lte=fecha_hasta
+            creado_en__gte=start_aware,
+            creado_en__lte=end_aware
         ).select_related('creado_por')
         
+        print(f"[DIARIO] Movimientos encontrados: {movimientos.count()}")
+        
         for m in movimientos:
+            # Especificar claramente si es Gasto o Ingreso en la descripción
+            tipo_texto = "Gasto" if m.tipo == 'EGRESO' else "Ingreso"
+            desc = f"{tipo_texto} - {m.categoria}: {m.descripcion}"
+            
             events.append({
                 'id': f'mov-{m.id}',
                 'hora_raw': m.creado_en,
-                'tipo_evento': m.tipo, 
+                'tipo_evento': m.tipo,
                 'fecha': m.creado_en,
                 'monto': m.monto,
-                'descripcion': f"{m.categoria}: {m.descripcion}", 
+                'descripcion': desc,
                 'usuario': m.creado_por.username if m.creado_por else 'Sistema',
                 'es_entrada': m.tipo == 'INGRESO',
                 'estado': 'OK',
-                'detalles': {'CATEGORÍA': m.categoria, 'MÉTODO': m.metodo_pago, 'NOTA': m.descripcion}
+                'detalles': {
+                    'TIPO': tipo_texto.upper(),
+                    'CATEGORÍA': m.categoria,
+                    'MÉTODO': m.metodo_pago,
+                    'NOTA': m.descripcion
+                }
             })
 
-        # 3. Aperturas por Fecha
+        # =======================================================================
+        # 5. BUSCAR APERTURAS DE CAJA
+        # =======================================================================
         aperturas = CajaSesion.objects.filter(
-            fecha_apertura__date__gte=fecha_desde,
-            fecha_apertura__date__lte=fecha_hasta
+            fecha_apertura__gte=start_aware,
+            fecha_apertura__lte=end_aware
         ).select_related('usuario')
 
+        print(f"[DIARIO] Aperturas encontradas: {aperturas.count()}")
+
         for c in aperturas:
+            apertura_detalle = safe_json(c.detalle_apertura)
+            # Agregar EFECTIVO al detalle si no está
+            if 'EFECTIVO' not in apertura_detalle:
+                apertura_detalle['EFECTIVO'] = float(c.monto_inicial)
+            # Agregar comentarios si existen
+            if c.comentarios:
+                apertura_detalle['COMENTARIOS'] = c.comentarios
+                
             events.append({
                 'id': f'apertura-{c.id}',
                 'hora_raw': c.fecha_apertura,
@@ -280,18 +411,26 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'usuario': c.usuario.username,
                 'es_entrada': True,
                 'estado': 'OK',
-                'detalles': safe_json(c.detalle_apertura) 
+                'detalles': apertura_detalle
             })
 
-        # 4. Cierres por Fecha
+        # =======================================================================
+        # 6. BUSCAR CIERRES DE CAJA
+        # =======================================================================
         cierres = CajaSesion.objects.filter(
-            fecha_cierre__date__gte=fecha_desde,
-            fecha_cierre__date__lte=fecha_hasta,
+            fecha_cierre__gte=start_aware,
+            fecha_cierre__lte=end_aware,
             estado='CERRADA'
         ).select_related('usuario')
 
+        print(f"[DIARIO] Cierres encontrados: {cierres.count()}")
+
         for c in cierres:
-             events.append({
+            cierre_detalle = safe_json(c.detalle_cierre)
+            # Excluir TRANSFERENCIA del detalle de cierre
+            cierre_detalle_filtrado = {k: v for k, v in cierre_detalle.items() if k != 'TRANSFERENCIA'}
+            
+            events.append({
                 'id': f'cierre-{c.id}',
                 'hora_raw': c.fecha_cierre,
                 'tipo_evento': 'CIERRE',
@@ -299,10 +438,16 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'monto': c.monto_final_real or 0,
                 'descripcion': f'Cierre de Caja',
                 'usuario': c.usuario.username,
-                'es_entrada': None, 
+                'es_entrada': None,
                 'estado': 'OK',
-                'detalles': safe_json(c.detalle_cierre)
+                'detalles': cierre_detalle_filtrado
             })
 
+        # =======================================================================
+        # 7. ORDENAR EVENTOS POR FECHA Y RETORNAR
+        # =======================================================================
         events.sort(key=lambda x: x['hora_raw'] if x['hora_raw'] else timezone.now())
+        
+        print(f"[DIARIO] Total eventos a retornar: {len(events)}")
+        
         return Response(events)
