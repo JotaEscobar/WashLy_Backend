@@ -1,15 +1,37 @@
 """
 Modelos para la gestión de tickets/órdenes de servicio
+Actualizado para SaaS (Multi-tenant) con lógica de negocio completa
 """
 
 from django.db import models
 from django.contrib.auth.models import User
-from core.models import AuditModel, SoftDeleteModel, Sede
+from core.models import AuditModel, SoftDeleteModel, Sede, Empresa, TimeStampedModel
 from core.utils import generar_numero_unico, generar_qr_code
+from django.utils import timezone
+
+
+class ConfiguracionTicket(TimeStampedModel):
+    """
+    Configuración de tickets específica por Empresa
+    """
+    empresa = models.OneToOneField(Empresa, on_delete=models.CASCADE, related_name='config_tickets')
+    
+    prefijo_ticket = models.CharField(max_length=5, default='TKT', verbose_name="Prefijo (Ej: TKT)")
+    plazo_entrega_default = models.PositiveIntegerField(default=48, verbose_name="Plazo entrega default (horas)")
+    
+    terminos_condiciones = models.TextField(default="No nos hacemos responsables por prendas que destiñen...", verbose_name="Términos y Condiciones")
+    pie_pagina_ticket = models.TextField(default="¡Gracias por su preferencia!", verbose_name="Pie de página del ticket")
+    
+    # Formato visual
+    mostrar_precios_ticket = models.BooleanField(default=True)
+    incluir_logo_ticket = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"Config Tickets - {self.empresa.nombre}"
 
 
 class Cliente(AuditModel, SoftDeleteModel):
-    """Modelo de Cliente"""
+    """Modelo de Cliente (SaaS)"""
     
     TIPO_DOCUMENTO_CHOICES = [
         ('DNI', 'DNI'),
@@ -19,7 +41,7 @@ class Cliente(AuditModel, SoftDeleteModel):
     ]
     
     tipo_documento = models.CharField(max_length=20, choices=TIPO_DOCUMENTO_CHOICES, default='DNI')
-    numero_documento = models.CharField(max_length=20, unique=True, verbose_name="Número de documento")
+    numero_documento = models.CharField(max_length=20, verbose_name="Número de documento")
     nombres = models.CharField(max_length=200, verbose_name="Nombres")
     apellidos = models.CharField(max_length=200, verbose_name="Apellidos", blank=True)
     telefono = models.CharField(max_length=20, verbose_name="Teléfono")
@@ -31,7 +53,7 @@ class Cliente(AuditModel, SoftDeleteModel):
     notas = models.TextField(blank=True, verbose_name="Notas")
     preferencias = models.JSONField(default=dict, blank=True, verbose_name="Preferencias")
     
-    # Relación con sede
+    # Relación con sede (Opcional, si el cliente pertenece a una sede específica)
     sede = models.ForeignKey(
         Sede,
         on_delete=models.CASCADE,
@@ -45,6 +67,8 @@ class Cliente(AuditModel, SoftDeleteModel):
         verbose_name = "Cliente"
         verbose_name_plural = "Clientes"
         ordering = ['-creado_en']
+        # VALIDACIÓN SAAS: El documento debe ser único POR EMPRESA
+        unique_together = ['empresa', 'tipo_documento', 'numero_documento']
         indexes = [
             models.Index(fields=['numero_documento']),
             models.Index(fields=['telefono']),
@@ -67,7 +91,7 @@ class Cliente(AuditModel, SoftDeleteModel):
 
 
 class Ticket(AuditModel, SoftDeleteModel):
-    """Modelo principal de Ticket/Orden de Servicio"""
+    """Modelo principal de Ticket/Orden de Servicio (SaaS)"""
     
     ESTADO_CHOICES = [
         ('RECIBIDO', 'Recibido'),
@@ -91,10 +115,13 @@ class Ticket(AuditModel, SoftDeleteModel):
     # Identificación única
     numero_ticket = models.CharField(
         max_length=50,
-        unique=True,
         verbose_name="Número de Ticket",
         db_index=True
     )
+    
+    # Nuevo campo SaaS: Secuencial humano reseteable por empresa
+    secuencial = models.PositiveIntegerField(default=0, verbose_name="Secuencial Humano")
+
     qr_code = models.ImageField(
         upload_to='tickets/qr/',
         blank=True,
@@ -102,7 +129,6 @@ class Ticket(AuditModel, SoftDeleteModel):
         verbose_name="Código QR"
     )
     
-    # Información del cliente y sede
     cliente = models.ForeignKey(
         Cliente,
         on_delete=models.PROTECT,
@@ -118,7 +144,6 @@ class Ticket(AuditModel, SoftDeleteModel):
         blank=True
     )
     
-    # Estado y fechas
     estado = models.CharField(
         max_length=20,
         choices=ESTADO_CHOICES,
@@ -142,14 +167,11 @@ class Ticket(AuditModel, SoftDeleteModel):
     fecha_prometida = models.DateTimeField(verbose_name="Fecha Prometida de Entrega")
     fecha_entrega = models.DateTimeField(null=True, blank=True, verbose_name="Fecha Real de Entrega")
     
-    # Información adicional
     observaciones = models.TextField(blank=True, verbose_name="Observaciones")
     instrucciones_especiales = models.TextField(blank=True, verbose_name="Instrucciones Especiales")
     
-    # Control de pago
     requiere_pago_anticipado = models.BooleanField(default=False, verbose_name="Requiere Pago Anticipado")
     
-    # Empleado asignado
     empleado_asignado = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -163,6 +185,8 @@ class Ticket(AuditModel, SoftDeleteModel):
         verbose_name = "Ticket"
         verbose_name_plural = "Tickets"
         ordering = ['-fecha_recepcion']
+        # VALIDACIÓN SAAS: El número de ticket es único POR EMPRESA
+        unique_together = ['empresa', 'numero_ticket']
         indexes = [
             models.Index(fields=['numero_ticket']),
             models.Index(fields=['estado', 'fecha_recepcion']),
@@ -173,17 +197,37 @@ class Ticket(AuditModel, SoftDeleteModel):
         return f"Ticket {self.numero_ticket} - {self.cliente.nombre_completo}"
     
     def save(self, *args, **kwargs):
-        # Generar número de ticket si no existe
-        if not self.numero_ticket:
-            self.numero_ticket = generar_numero_unico(prefijo='TKT')
+        # LÓGICA SAAS: Generar número usando configuración de empresa
+        if not self.numero_ticket and self.empresa:
+            try:
+                # Intentamos obtener config, si no existe usamos default
+                config = self.empresa.config_tickets
+                prefijo = config.prefijo_ticket
+            except:
+                prefijo = 'TKT'
+            
+            # Buscamos el último secuencial de ESTA empresa
+            ultimo = Ticket.objects.filter(empresa=self.empresa).order_by('-secuencial').first()
+            nuevo_sec = (ultimo.secuencial + 1) if ultimo else 1
+            self.secuencial = nuevo_sec
+            
+            # Formato: PREFIJO-AÑO-SECUENCIAL (Ej: WASH-2024-0001)
+            anio = timezone.now().year
+            self.numero_ticket = f"{prefijo}-{anio}-{str(nuevo_sec).zfill(6)}"
         
+        # Fallback por si acaso falla la lógica anterior o no hay empresa (casos edge)
+        if not self.numero_ticket:
+             self.numero_ticket = generar_numero_unico(prefijo='TKT')
+
         # Generar código QR si no existe
         if not self.qr_code:
-            qr_data = f"WASHLY-TICKET-{self.numero_ticket}"
+            qr_data = f"WASHLY|{self.numero_ticket}|{self.id}"
             self.qr_code = generar_qr_code(qr_data, filename=f'ticket_{self.numero_ticket}')
         
         super().save(*args, **kwargs)
     
+    # --- MÉTODOS DE NEGOCIO ORIGINALES RESTAURADOS ---
+
     def calcular_total(self):
         """Calcula el total del ticket sumando todos los items"""
         return self.items.aggregate(
@@ -218,7 +262,6 @@ class Ticket(AuditModel, SoftDeleteModel):
         if not puede:
             raise ValueError(mensaje)
         
-        from django.utils import timezone
         self.estado = 'ENTREGADO'
         self.fecha_entrega = timezone.now()
         self.save()
@@ -279,13 +322,12 @@ class TicketItem(AuditModel):
     
     @property
     def subtotal(self):
-        # Si no hay cantidad o precio, retornamos 0 para evitar el error
         if not self.cantidad or self.precio_unitario is None:
             return 0
         return self.cantidad * self.precio_unitario
     
     def save(self, *args, **kwargs):
-        # Si no se especifica precio, tomar del servicio
+        # Lógica original para determinar precio
         if not self.precio_unitario and self.servicio:
             if self.prenda:
                 # Buscar precio específico de servicio-prenda
@@ -302,8 +344,9 @@ class TicketItem(AuditModel):
         super().save(*args, **kwargs)
 
 
-class EstadoHistorial(models.Model):
+class EstadoHistorial(AuditModel):
     """Historial de cambios de estado de un ticket"""
+    # Hereda de AuditModel para tener campos de auditoría y tenant
     
     ticket = models.ForeignKey(
         Ticket,
@@ -316,12 +359,11 @@ class EstadoHistorial(models.Model):
     estado_nuevo = models.CharField(max_length=20, verbose_name="Estado Nuevo")
     
     fecha_cambio = models.DateTimeField(auto_now_add=True, verbose_name="Fecha de Cambio")
-    usuario = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        verbose_name="Usuario que realizó el cambio"
-    )
+    
+    # 'usuario' ya viene incluido en AuditModel como 'creado_por', 
+    # pero mantenemos 'usuario' explícito si tu lógica frontend lo usa así, 
+    # o mejor usamos el AuditModel para estandarizar.
+    # Para no romper compatibilidad, mantendremos la propiedad apuntando a creado_por
     
     comentario = models.TextField(blank=True, verbose_name="Comentario")
     
@@ -332,3 +374,7 @@ class EstadoHistorial(models.Model):
     
     def __str__(self):
         return f"Ticket {self.ticket.numero_ticket}: {self.estado_anterior} → {self.estado_nuevo}"
+    
+    @property
+    def usuario(self):
+        return self.creado_por

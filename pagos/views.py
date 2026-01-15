@@ -1,3 +1,8 @@
+"""
+Views para la app pagos
+Actualizado para SaaS: Filtros por Empresa y Soporte de Métodos Dinámicos
+"""
+
 from rest_framework import viewsets, filters, serializers, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -5,33 +10,73 @@ from django.utils import timezone
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 import json
-from .models import Pago, CajaSesion, MovimientoCaja
-from .serializers import PagoSerializer, CajaSesionSerializer, MovimientoCajaSerializer
 
-class PagoViewSet(viewsets.ModelViewSet):
+from .models import Pago, CajaSesion, MovimientoCaja, MetodoPagoConfig
+from .serializers import (
+    PagoSerializer, CajaSesionSerializer, MovimientoCajaSerializer, 
+    MetodoPagoConfigSerializer
+)
+
+class BaseTenantViewSet(viewsets.ModelViewSet):
+    """
+    Clase base para asegurar que todo se filtre por la empresa del usuario.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_queryset(self):
+        # Filtra siempre por la empresa del usuario logueado
+        return self.queryset.model.objects.filter(
+            empresa=self.request.user.perfil.empresa
+        )
+    
+    def perform_create(self, serializer):
+        # Asigna la empresa automáticamente al crear
+        serializer.save(
+            empresa=self.request.user.perfil.empresa,
+            creado_por=self.request.user
+        )
+
+
+class MetodoPagoConfigViewSet(BaseTenantViewSet):
+    """CRUD para configurar métodos de pago (Yape, Plin, Bancos)"""
+    queryset = MetodoPagoConfig.objects.filter(activo=True)
+    serializer_class = MetodoPagoConfigSerializer
+
+
+class PagoViewSet(BaseTenantViewSet):
     queryset = Pago.objects.all()
     serializer_class = PagoSerializer
-    permission_classes = [permissions.IsAuthenticated]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['numero_pago', 'ticket__numero_ticket', 'ticket__cliente__nombres', 'ticket__cliente__apellidos']
     ordering = ['-fecha_pago']
 
     def perform_create(self, serializer):
         user = self.request.user
-        caja_abierta = CajaSesion.objects.filter(usuario=user, estado='ABIERTA').first()
+        empresa = user.perfil.empresa
+        
+        # Validar caja abierta EN MI EMPRESA
+        caja_abierta = CajaSesion.objects.filter(
+            usuario=user, 
+            empresa=empresa, 
+            estado='ABIERTA'
+        ).first()
         
         if not caja_abierta:
             raise serializers.ValidationError(
                 {"error": "No tienes una caja abierta. Apertura caja para registrar pagos."}
             )
             
-        serializer.save(creado_por=user, caja=caja_abierta)
+        serializer.save(
+            creado_por=user, 
+            caja=caja_abierta,
+            empresa=empresa
+        )
 
     @action(detail=True, methods=['post'])
     def anular(self, request, pk=None):
-        pago = self.get_object()
+        pago = self.get_object() # get_object ya usa get_queryset que filtra por empresa
         
-        # Validar fecha con timezone local para evitar errores de UTC
+        # Validar fecha con timezone local
         now_local = timezone.localtime(timezone.now())
         pago_local = timezone.localtime(pago.fecha_pago)
         
@@ -49,13 +94,16 @@ class PagoViewSet(viewsets.ModelViewSet):
         
         return Response({'status': 'Pago extornado. El saldo ha retornado al ticket.'})
 
-class CajaViewSet(viewsets.ModelViewSet):
+
+class CajaViewSet(BaseTenantViewSet):
     queryset = CajaSesion.objects.all().order_by('-fecha_apertura')
     serializer_class = CajaSesionSerializer
-    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        # 1. Filtro base por empresa (del BaseTenantViewSet)
         queryset = super().get_queryset()
+        
+        # 2. Filtros de fecha adicionales
         fecha_desde = self.request.query_params.get('fecha_desde')
         fecha_hasta = self.request.query_params.get('fecha_hasta')
         
@@ -81,10 +129,8 @@ class CajaViewSet(viewsets.ModelViewSet):
 
         # 1. Apertura
         apertura_detalle = safe_json(caja.detalle_apertura)
-        # Agregar EFECTIVO al detalle si no está
         if 'EFECTIVO' not in apertura_detalle:
             apertura_detalle['EFECTIVO'] = float(caja.monto_inicial)
-        # Agregar comentarios si existen
         if caja.comentarios:
             apertura_detalle['COMENTARIOS'] = caja.comentarios
             
@@ -102,17 +148,20 @@ class CajaViewSet(viewsets.ModelViewSet):
         })
         
         # 2. Pagos
-        pagos = Pago.objects.filter(caja=caja).select_related('ticket', 'ticket__cliente')
+        pagos = Pago.objects.filter(caja=caja).select_related('ticket', 'ticket__cliente', 'metodo_pago_config')
         for p in pagos:
             desc = f"Pago Ticket #{p.ticket.numero_ticket}"
             if p.estado == 'ANULADO':
                 desc += " (ANULADO)"
             
-            # Obtener nombre del cliente
+            # Nombre del cliente
             cliente_nombre = "N/A"
             if hasattr(p.ticket, 'cliente') and p.ticket.cliente:
                 cliente_nombre = f"{p.ticket.cliente.nombres} {p.ticket.cliente.apellidos}".strip()
             
+            # Obtener nombre del método dinámico o snapshot
+            metodo_nombre = p.metodo_pago_snapshot or (p.metodo_pago_config.nombre_mostrar if p.metodo_pago_config else "N/A")
+
             events.append({
                 'id': f'pago-{p.id}',
                 'hora_raw': p.fecha_pago,
@@ -123,15 +172,17 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'usuario': p.creado_por.username if p.creado_por else 'Sistema',
                 'es_entrada': True,
                 'estado': p.estado,
-                'detalles': {'MÉTODO': p.metodo_pago, 'TICKET': p.ticket.numero_ticket, 'CLIENTE': cliente_nombre}
+                'detalles': {'MÉTODO': metodo_nombre, 'TICKET': p.ticket.numero_ticket, 'CLIENTE': cliente_nombre}
             })
             
         # 3. Movimientos
-        movimientos = caja.movimientos_extra.all()
+        movimientos = caja.movimientos_extra.all().select_related('metodo_pago_config')
         for m in movimientos:
-            # Especificar claramente si es Gasto o Ingreso en la descripción
             tipo_texto = "Gasto" if m.tipo == 'EGRESO' else "Ingreso"
             desc = f"{tipo_texto} - {m.categoria}: {m.descripcion}"
+            
+            # Obtener nombre del método (o EFECTIVO si es null)
+            metodo_nombre = m.metodo_pago_config.nombre_mostrar if m.metodo_pago_config else "EFECTIVO"
             
             events.append({
                 'id': f'mov-{m.id}',
@@ -143,13 +194,13 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'usuario': m.creado_por.username if m.creado_por else 'Sistema',
                 'es_entrada': m.tipo == 'INGRESO',
                 'estado': 'OK',
-                'detalles': {'TIPO': tipo_texto.upper(), 'CATEGORÍA': m.categoria, 'MÉTODO': m.metodo_pago, 'NOTA': m.descripcion}
+                'detalles': {'TIPO': tipo_texto.upper(), 'CATEGORÍA': m.categoria, 'MÉTODO': metodo_nombre, 'NOTA': m.descripcion}
             })
             
         # 4. Cierre
         if caja.fecha_cierre and caja.estado == 'CERRADA':
             cierre_detalle = safe_json(caja.detalle_cierre)
-            # Excluir TRANSFERENCIA del detalle de cierre
+            # Excluir claves internas si es necesario
             cierre_detalle_filtrado = {k: v for k, v in cierre_detalle.items() if k != 'TRANSFERENCIA'}
             
             events.append({
@@ -168,14 +219,22 @@ class CajaViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def mi_caja(self, request):
-        caja = CajaSesion.objects.filter(usuario=request.user, estado='ABIERTA').first()
+        caja = CajaSesion.objects.filter(
+            usuario=request.user, 
+            empresa=request.user.perfil.empresa, # Filtro SaaS
+            estado='ABIERTA'
+        ).first()
         if caja:
             return Response(self.get_serializer(caja).data)
         return Response(None)
 
     @action(detail=False, methods=['get'])
     def ultimo_cierre(self, request):
-        ultima_caja = CajaSesion.objects.filter(estado='CERRADA').order_by('-fecha_cierre').first()
+        ultima_caja = CajaSesion.objects.filter(
+            empresa=request.user.perfil.empresa, # Filtro SaaS
+            estado='CERRADA'
+        ).order_by('-fecha_cierre').first()
+        
         if not ultima_caja: return Response(None)
         detalle = {}
         try: detalle = json.loads(ultima_caja.detalle_cierre) if ultima_caja.detalle_cierre else {}
@@ -184,7 +243,9 @@ class CajaViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['post'])
     def abrir(self, request):
-        if CajaSesion.objects.filter(usuario=request.user, estado='ABIERTA').exists():
+        empresa = request.user.perfil.empresa
+        
+        if CajaSesion.objects.filter(usuario=request.user, empresa=empresa, estado='ABIERTA').exists():
             return Response({'error': 'Ya tienes una caja abierta'}, status=400)
         
         detalle = request.data.get('detalle_apertura', {})
@@ -192,16 +253,19 @@ class CajaViewSet(viewsets.ModelViewSet):
         
         caja = CajaSesion.objects.create(
             usuario=request.user,
+            empresa=empresa, # Asignación SaaS
             monto_inicial=monto_inicial,
             detalle_apertura=json.dumps(detalle) if isinstance(detalle, dict) else str(detalle),
-            estado='ABIERTA'
+            estado='ABIERTA',
+            creado_por=request.user
         )
         serializer = self.get_serializer(caja, context={'request': request})
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
     def cerrar(self, request, pk=None):
-        caja = self.get_object()
+        caja = self.get_object() # Ya filtra por empresa
+        
         caja.monto_final_real = Decimal(str(request.data.get('monto_real', 0)))
         caja.comentarios = request.data.get('comentarios', '')
         detalle = request.data.get('detalle_cierre', {})
@@ -221,11 +285,22 @@ class CajaViewSet(viewsets.ModelViewSet):
         if caja.estado != 'ABIERTA':
              return Response({'error': 'Caja cerrada'}, status=400)
 
+        # Buscar config del método de pago si se envía ID
+        metodo_id = request.data.get('metodo_pago_id')
+        metodo_config = None
+        if metodo_id:
+            metodo_config = MetodoPagoConfig.objects.filter(
+                id=metodo_id, 
+                empresa=caja.empresa
+            ).first()
+
         MovimientoCaja.objects.create(
             caja=caja,
+            empresa=caja.empresa, # Asignación SaaS
             tipo=request.data.get('tipo'),
             monto=request.data.get('monto'),
-            metodo_pago=request.data.get('metodo_pago', 'EFECTIVO'),
+            metodo_pago_config=metodo_config, # Asignación dinámica
+            # 'metodo_pago' (string antiguo) se puede mantener por compatibilidad o eliminar
             descripcion=request.data.get('descripcion', ''), 
             categoria=request.data.get('categoria', 'GENERAL'),
             creado_por=request.user
@@ -240,98 +315,50 @@ class CajaViewSet(viewsets.ModelViewSet):
         return Response(events)
 
     # =============================================================================
-    # DIARIO CONSOLIDADO - VERSIÓN CORREGIDA PARA WASHLY
+    # DIARIO CONSOLIDADO - SAAS SAFE
     # =============================================================================
-    # Problema identificado: El uso de __range con time.max causaba problemas
-    # con la zona horaria America/Lima cuando los registros se creaban cerca de
-    # la medianoche. Los registros no aparecían porque el timestamp en UTC caía
-    # fuera del rango de búsqueda.
-    # 
-    # Solución implementada:
-    # 1. Cambiar de __range a __gte y __lte para mayor control
-    # 2. Calcular correctamente el fin del día usando timedelta
-    # 3. Agregar logs de debugging para diagnóstico
-    # =============================================================================
-    
     @action(detail=False, methods=['get'])
     def diario(self, request):
-        """
-        Endpoint que retorna el historial consolidado de movimientos de caja
-        filtrado por rango de fechas. Incluye:
-        - Pagos de tickets
-        - Movimientos manuales (ingresos/gastos)
-        - Aperturas de caja
-        - Cierres de caja
-        """
         fecha_desde_str = request.query_params.get('fecha_desde')
         fecha_hasta_str = request.query_params.get('fecha_hasta')
+        empresa_actual = request.user.perfil.empresa
         
-        # 1. Obtener fecha base en Hora Local (America/Lima)
+        # 1. Fechas
         now_local = timezone.localtime(timezone.now())
-        
-        # Determinar rango de fechas (por defecto: hoy)
-        if fecha_desde_str:
-            dt_start = datetime.strptime(fecha_desde_str, '%Y-%m-%d').date()
-        else:
-            dt_start = now_local.date()
+        dt_start = datetime.strptime(fecha_desde_str, '%Y-%m-%d').date() if fecha_desde_str else now_local.date()
+        dt_end = datetime.strptime(fecha_hasta_str, '%Y-%m-%d').date() if fecha_hasta_str else now_local.date()
 
-        if fecha_hasta_str:
-            dt_end = datetime.strptime(fecha_hasta_str, '%Y-%m-%d').date()
-        else:
-            dt_end = now_local.date()
-
-        # 2. Construir rango timezone-aware correcto
-        # IMPORTANTE: No usar time.max (23:59:59.999999) porque causa problemas
-        # con la conversión de zonas horarias. En su lugar, usar el inicio del
-        # día siguiente menos 1 microsegundo.
-        
-        # Inicio del día en hora local
-        start_naive = datetime.combine(dt_start, time.min)  # 00:00:00
+        # 2. Rango Timezone-aware
+        start_naive = datetime.combine(dt_start, time.min)
         start_aware = timezone.make_aware(start_naive)
         
-        # Fin del día = inicio del día siguiente - 1 microsegundo
-        # Esto captura todo hasta las 23:59:59.999999 sin problemas de timezone
         end_naive = datetime.combine(dt_end + timedelta(days=1), time.min) - timedelta(microseconds=1)
         end_aware = timezone.make_aware(end_naive)
 
-        # Lista para almacenar todos los eventos
         events = []
         
-        # Helper para parsear JSON de forma segura
         def safe_json(val):
-            try: 
-                return json.loads(val) if val else {}
-            except: 
-                return {}
+            try: return json.loads(val) if val else {}
+            except: return {}
 
-        # DEBUG: Log del rango de búsqueda (útil para diagnóstico)
-        # Puedes comentar estas líneas en producción si no las necesitas
-        print(f"[DIARIO] Buscando movimientos desde {start_aware} hasta {end_aware}")
-        print(f"[DIARIO] Zona horaria: {timezone.get_current_timezone()}")
+        print(f"[DIARIO] Buscando movimientos para {empresa_actual} desde {start_aware} hasta {end_aware}")
 
         # =======================================================================
-        # 3. BUSCAR PAGOS DE TICKETS
+        # 3. BUSCAR PAGOS (Filtrado por empresa)
         # =======================================================================
-        # CAMBIO CRÍTICO: Usar __gte y __lte en lugar de __range
-        # Esto da mayor control y evita problemas de límites con zonas horarias
         pagos = Pago.objects.filter(
+            empresa=empresa_actual,
             fecha_pago__gte=start_aware,
             fecha_pago__lte=end_aware
-        ).select_related('ticket', 'creado_por', 'ticket__cliente')
-        
-        print(f"[DIARIO] Pagos encontrados: {pagos.count()}")
+        ).select_related('ticket', 'creado_por', 'ticket__cliente', 'metodo_pago_config')
         
         for p in pagos:
             desc = f"Pago Ticket #{p.ticket.numero_ticket}"
-            if p.estado == 'ANULADO': 
-                desc += " (ANULADO)"
+            if p.estado == 'ANULADO': desc += " (ANULADO)"
             
-            # Obtener nombre del cliente
-            cliente_nombre = "N/A"
-            if hasattr(p.ticket, 'cliente') and p.ticket.cliente:
-                cliente_nombre = f"{p.ticket.cliente.nombres} {p.ticket.cliente.apellidos}".strip()
+            cliente_nombre = p.ticket.cliente.nombre_completo if p.ticket.cliente else "N/A"
+            metodo_nombre = p.metodo_pago_snapshot or (p.metodo_pago_config.nombre_mostrar if p.metodo_pago_config else "N/A")
             
-            # Construir objeto de evento
             events.append({
                 'id': f'pago-{p.id}',
                 'hora_raw': p.fecha_pago,
@@ -343,26 +370,25 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'es_entrada': True,
                 'estado': p.estado,
                 'detalles': {
-                    'MÉTODO': p.metodo_pago,
+                    'MÉTODO': metodo_nombre,
                     'TICKET': p.ticket.numero_ticket,
                     'CLIENTE': cliente_nombre
                 }
             })
 
         # =======================================================================
-        # 4. BUSCAR MOVIMIENTOS MANUALES (INGRESOS/GASTOS)
+        # 4. BUSCAR MOVIMIENTOS MANUALES (Filtrado por empresa)
         # =======================================================================
         movimientos = MovimientoCaja.objects.filter(
+            empresa=empresa_actual,
             creado_en__gte=start_aware,
             creado_en__lte=end_aware
-        ).select_related('creado_por')
-        
-        print(f"[DIARIO] Movimientos encontrados: {movimientos.count()}")
+        ).select_related('creado_por', 'metodo_pago_config')
         
         for m in movimientos:
-            # Especificar claramente si es Gasto o Ingreso en la descripción
             tipo_texto = "Gasto" if m.tipo == 'EGRESO' else "Ingreso"
             desc = f"{tipo_texto} - {m.categoria}: {m.descripcion}"
+            metodo_nombre = m.metodo_pago_config.nombre_mostrar if m.metodo_pago_config else "EFECTIVO"
             
             events.append({
                 'id': f'mov-{m.id}',
@@ -377,27 +403,24 @@ class CajaViewSet(viewsets.ModelViewSet):
                 'detalles': {
                     'TIPO': tipo_texto.upper(),
                     'CATEGORÍA': m.categoria,
-                    'MÉTODO': m.metodo_pago,
+                    'MÉTODO': metodo_nombre,
                     'NOTA': m.descripcion
                 }
             })
 
         # =======================================================================
-        # 5. BUSCAR APERTURAS DE CAJA
+        # 5. BUSCAR APERTURAS (Filtrado por empresa)
         # =======================================================================
         aperturas = CajaSesion.objects.filter(
+            empresa=empresa_actual,
             fecha_apertura__gte=start_aware,
             fecha_apertura__lte=end_aware
         ).select_related('usuario')
 
-        print(f"[DIARIO] Aperturas encontradas: {aperturas.count()}")
-
         for c in aperturas:
             apertura_detalle = safe_json(c.detalle_apertura)
-            # Agregar EFECTIVO al detalle si no está
             if 'EFECTIVO' not in apertura_detalle:
                 apertura_detalle['EFECTIVO'] = float(c.monto_inicial)
-            # Agregar comentarios si existen
             if c.comentarios:
                 apertura_detalle['COMENTARIOS'] = c.comentarios
                 
@@ -415,19 +438,17 @@ class CajaViewSet(viewsets.ModelViewSet):
             })
 
         # =======================================================================
-        # 6. BUSCAR CIERRES DE CAJA
+        # 6. BUSCAR CIERRES (Filtrado por empresa)
         # =======================================================================
         cierres = CajaSesion.objects.filter(
+            empresa=empresa_actual,
             fecha_cierre__gte=start_aware,
             fecha_cierre__lte=end_aware,
             estado='CERRADA'
         ).select_related('usuario')
 
-        print(f"[DIARIO] Cierres encontrados: {cierres.count()}")
-
         for c in cierres:
             cierre_detalle = safe_json(c.detalle_cierre)
-            # Excluir TRANSFERENCIA del detalle de cierre
             cierre_detalle_filtrado = {k: v for k, v in cierre_detalle.items() if k != 'TRANSFERENCIA'}
             
             events.append({
@@ -444,10 +465,7 @@ class CajaViewSet(viewsets.ModelViewSet):
             })
 
         # =======================================================================
-        # 7. ORDENAR EVENTOS POR FECHA Y RETORNAR
+        # 7. ORDENAR Y RETORNAR
         # =======================================================================
         events.sort(key=lambda x: x['hora_raw'] if x['hora_raw'] else timezone.now())
-        
-        print(f"[DIARIO] Total eventos a retornar: {len(events)}")
-        
         return Response(events)

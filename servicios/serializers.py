@@ -1,5 +1,6 @@
 """
 Serializers para la app servicios
+Actualizado para SaaS (Multi-tenant) y Lógica de Precios corregida
 """
 
 from rest_framework import serializers
@@ -18,7 +19,8 @@ class CategoriaServicioSerializer(serializers.ModelSerializer):
             'id', 'nombre', 'descripcion', 'icono', 'orden',
             'activo', 'cantidad_servicios', 'creado_en'
         ]
-        read_only_fields = ['creado_en']
+        # SAAS: empresa y creado_por son automáticos, no se editan
+        read_only_fields = ['creado_en', 'empresa', 'creado_por']
     
     def get_cantidad_servicios(self, obj):
         return obj.servicios.filter(activo=True, disponible=True).count()
@@ -28,7 +30,7 @@ class TipoPrendaSerializer(serializers.ModelSerializer):
     class Meta:
         model = TipoPrenda
         fields = ['id', 'nombre', 'descripcion', 'icono', 'activo', 'creado_en']
-        read_only_fields = ['creado_en']
+        read_only_fields = ['creado_en', 'empresa', 'creado_por']
 
 
 class PrendaSerializer(serializers.ModelSerializer):
@@ -40,7 +42,7 @@ class PrendaSerializer(serializers.ModelSerializer):
             'id', 'nombre', 'tipo', 'tipo_nombre',
             'multiplicador_precio', 'activo', 'creado_en'
         ]
-        read_only_fields = ['creado_en']
+        read_only_fields = ['creado_en', 'empresa', 'creado_por']
 
 
 class PrecioPorPrendaSerializer(serializers.ModelSerializer):
@@ -53,7 +55,7 @@ class PrecioPorPrendaSerializer(serializers.ModelSerializer):
             'id', 'servicio', 'servicio_nombre', 'prenda',
             'prenda_nombre', 'precio', 'creado_en'
         ]
-        read_only_fields = ['creado_en']
+        read_only_fields = ['creado_en', 'empresa', 'creado_por']
 
 
 class ServicioSerializer(serializers.ModelSerializer):
@@ -65,11 +67,11 @@ class ServicioSerializer(serializers.ModelSerializer):
         model = Servicio
         fields = [
             'id', 'nombre', 'codigo', 'descripcion', 'categoria',
-            'categoria_nombre', 'precio_base', 'tiempo_estimado',
+            'categoria_nombre', 'tipo_cobro', 'precio_base', 'tiempo_estimado', # Agregado tipo_cobro
             'requiere_prenda', 'disponible', 'sedes', 'sedes_nombres',
             'precios_prendas', 'activo', 'creado_en'
         ]
-        read_only_fields = ['creado_en']
+        read_only_fields = ['creado_en', 'empresa', 'creado_por']
     
     def get_sedes_nombres(self, obj):
         return [sede.nombre for sede in obj.sedes.all()]
@@ -85,6 +87,7 @@ class ServicioListSerializer(serializers.ModelSerializer):
             'id', 'nombre', 'codigo', 
             'categoria',
             'categoria_nombre', 
+            'tipo_cobro', # Importante para el frontend saber si muestra selector de prendas
             'precio_base', 'disponible'
         ]
 
@@ -102,7 +105,7 @@ class PromocionSerializer(serializers.ModelSerializer):
             'activa', 'usos_maximos', 'usos_actuales', 'es_valida',
             'activo', 'creado_en'
         ]
-        read_only_fields = ['creado_en', 'usos_actuales', 'es_valida']
+        read_only_fields = ['creado_en', 'usos_actuales', 'es_valida', 'empresa', 'creado_por']
     
     def get_servicios_nombres(self, obj):
         return [servicio.nombre for servicio in obj.servicios.all()]
@@ -112,5 +115,6 @@ class CalcularPrecioSerializer(serializers.Serializer):
     """Serializer para calcular precios"""
     servicio_id = serializers.IntegerField()
     prenda_id = serializers.IntegerField(required=False, allow_null=True)
-    cantidad = serializers.IntegerField(default=1, min_value=1)
+    # Cambiado a Decimal para soportar pesaje (ej. 1.5 kilos)
+    cantidad = serializers.DecimalField(max_digits=10, decimal_places=2, default=1) 
     promocion_codigo = serializers.CharField(required=False, allow_blank=True)

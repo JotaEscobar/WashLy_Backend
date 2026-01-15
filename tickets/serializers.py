@@ -1,7 +1,13 @@
+"""
+Serializers para la app tickets
+Actualizado para SaaS (Multi-tenant) y Pagos Dinámicos
+"""
+
 from rest_framework import serializers
 from django.utils import timezone
 from django.db.models import Sum
 from .models import Cliente, Ticket, TicketItem, EstadoHistorial
+from pagos.models import CajaSesion, Pago, MetodoPagoConfig
 
 # --- SERIALIZERS DE CLIENTE ---
 
@@ -9,10 +15,12 @@ class ClienteSerializer(serializers.ModelSerializer):
     """Serializer básico para CRUD de clientes"""
     nombre_completo = serializers.ReadOnlyField()
     total_gastado = serializers.ReadOnlyField()
+    
     class Meta:
         model = Cliente
         fields = '__all__'
-        read_only_fields = ['creado_en', 'fecha_registro']
+        # SAAS: empresa y creado_por son automáticos
+        read_only_fields = ['creado_en', 'fecha_registro', 'empresa', 'creado_por']
 
 class ClienteListSerializer(serializers.ModelSerializer):
     """Serializer ligero para dropdowns y selecciones simples"""
@@ -41,10 +49,9 @@ class ClienteCRMSerializer(serializers.ModelSerializer):
         ]
     
     def get_saldo_pendiente(self, obj):
-        # Calcula la deuda total sumando los saldos de todos los tickets activos
-        # Optimización: Esto puede ser pesado si no se usa prefetch_related en la vista
         deuda = 0
-        tickets_activos = obj.tickets.exclude(estado='CANCELADO')
+        # SAAS: Filtrar solo tickets de la misma empresa (por integridad)
+        tickets_activos = obj.tickets.filter(empresa=obj.empresa).exclude(estado='CANCELADO')
         for ticket in tickets_activos:
             deuda += ticket.calcular_saldo_pendiente()
         return float(deuda)
@@ -54,15 +61,10 @@ class ClienteCRMSerializer(serializers.ModelSerializer):
         hoy = timezone.now()
         inicio_mes = hoy.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         
-        # Filtramos pagos realizados este mes asociados a tickets del cliente
-        # Usamos la relación inversa a través de Tickets -> Pagos
         total_mes = 0
+        tickets = obj.tickets.filter(empresa=obj.empresa) # Filtro SaaS
         
-        # Nota: Idealmente esto se optimiza con anotaciones en el QuerySet, 
-        # pero por ahora lo mantenemos en lógica python para respetar tu estructura actual.
-        tickets = obj.tickets.all()
         for ticket in tickets:
-            # Asumiendo que Ticket tiene related_name='pagos' desde el modelo Pago
             pagos_mes = ticket.pagos.filter(
                 estado='PAGADO',
                 fecha_pago__gte=inicio_mes
@@ -77,17 +79,27 @@ class TicketItemSerializer(serializers.ModelSerializer):
     servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
     prenda_nombre = serializers.CharField(source='prenda.nombre', read_only=True)
     subtotal = serializers.ReadOnlyField()
+    
     class Meta:
         model = TicketItem
-        fields = ['id', 'servicio', 'servicio_nombre', 'prenda', 'prenda_nombre', 'cantidad', 'precio_unitario', 'subtotal', 'descripcion', 'completado', 'creado_en']
-        read_only_fields = ['creado_en', 'subtotal']
+        fields = [
+            'id', 'servicio', 'servicio_nombre', 'prenda', 'prenda_nombre', 
+            'cantidad', 'precio_unitario', 'subtotal', 'descripcion', 
+            'completado', 'creado_en'
+        ]
+        read_only_fields = ['creado_en', 'subtotal', 'empresa', 'creado_por']
 
 class EstadoHistorialSerializer(serializers.ModelSerializer):
-    usuario_nombre = serializers.CharField(source='usuario.username', read_only=True)
+    # En AuditModel el usuario es creado_por
+    usuario_nombre = serializers.CharField(source='creado_por.username', read_only=True)
+    
     class Meta:
         model = EstadoHistorial
-        fields = ['id', 'estado_anterior', 'estado_nuevo', 'fecha_cambio', 'usuario', 'usuario_nombre', 'comentario']
-        read_only_fields = ['fecha_cambio']
+        fields = [
+            'id', 'estado_anterior', 'estado_nuevo', 'fecha_cambio', 
+            'usuario_nombre', 'comentario'
+        ]
+        read_only_fields = ['fecha_cambio', 'empresa', 'creado_por']
 
 class TicketSerializer(serializers.ModelSerializer):
     items = TicketItemSerializer(many=True, read_only=True)
@@ -110,7 +122,11 @@ class TicketSerializer(serializers.ModelSerializer):
             'historial_estados', 'total', 'saldo_pendiente', 'esta_pagado',
             'creado_en', 'actualizado_en', 'activo'
         ]
-        read_only_fields = ['numero_ticket', 'qr_code', 'fecha_recepcion', 'creado_en', 'actualizado_en', 'total', 'saldo_pendiente', 'esta_pagado']
+        read_only_fields = [
+            'numero_ticket', 'qr_code', 'fecha_recepcion', 'creado_en', 
+            'actualizado_en', 'total', 'saldo_pendiente', 'esta_pagado',
+            'empresa', 'creado_por'
+        ]
     
     def get_total(self, obj): return float(obj.calcular_total())
     def get_saldo_pendiente(self, obj): return float(obj.calcular_saldo_pendiente())
@@ -141,21 +157,24 @@ class TicketListSerializer(serializers.ModelSerializer):
     def get_saldo_pendiente(self, obj): return float(obj.calcular_saldo_pendiente())
     
     def get_es_extornable(self, obj):
+        # Valida si tiene pagos hoy que puedan ser anulados
         hoy = timezone.localtime(timezone.now()).date()
-        relacion_pagos = getattr(obj, 'pagos', getattr(obj, 'pago_set', None))
+        pagos_hoy = obj.pagos.filter(estado='PAGADO') # related_name='pagos'
         
-        if relacion_pagos:
-            pagos_hoy = [
-                p for p in relacion_pagos.filter(estado='PAGADO') 
-                if timezone.localtime(p.fecha_pago).date() == hoy
-            ]
-            return len(pagos_hoy) > 0
+        for p in pagos_hoy:
+             if timezone.localtime(p.fecha_pago).date() == hoy:
+                 return True
         return False
 
 class TicketCreateSerializer(serializers.ModelSerializer):
     items = TicketItemSerializer(many=True)
+    
+    # Campos para el pago inicial (opcional)
     pago_monto = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, write_only=True)
-    metodo_pago = serializers.CharField(max_length=50, required=False, write_only=True)
+    metodo_pago_id = serializers.IntegerField(required=False, write_only=True) # ID de MetodoPagoConfig
+    
+    # Legacy support (si el frontend aún envía string)
+    metodo_pago_str = serializers.CharField(max_length=50, required=False, write_only=True)
 
     class Meta:
         model = Ticket
@@ -165,42 +184,73 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             'tipo_entrega', 
             'observaciones', 'instrucciones_especiales',
             'requiere_pago_anticipado', 'empleado_asignado', 'items',
-            'pago_monto', 'metodo_pago'
+            'pago_monto', 'metodo_pago_id', 'metodo_pago_str'
         ]
-        read_only_fields = ['id', 'numero_ticket', 'qr_code', 'creado_en']
+        read_only_fields = ['id', 'numero_ticket', 'qr_code', 'creado_en', 'empresa', 'creado_por']
     
     def create(self, validated_data):
         items_data = validated_data.pop('items')
         pago_monto = validated_data.pop('pago_monto', None)
-        metodo_pago = validated_data.pop('metodo_pago', 'EFECTIVO')
+        metodo_pago_id = validated_data.pop('metodo_pago_id', None)
+        metodo_pago_str = validated_data.pop('metodo_pago_str', None) # Legacy
         
         request = self.context.get('request')
-        user = request.user if request else None
+        user = request.user
+        empresa = user.perfil.empresa # Obtenemos empresa del usuario
+        
+        # Validar Caja si hay pago
         caja_abierta = None
-
-        if pago_monto is not None and float(pago_monto) > 0:
-            from pagos.models import CajaSesion
-            caja_abierta = CajaSesion.objects.filter(usuario=user, estado='ABIERTA').first()
+        metodo_config = None
+        
+        if pago_monto and float(pago_monto) > 0:
+            caja_abierta = CajaSesion.objects.filter(
+                usuario=user, 
+                empresa=empresa, 
+                estado='ABIERTA'
+            ).first()
             
             if not caja_abierta:
                 raise serializers.ValidationError({
                     "error": "No tienes una caja abierta. Apertura caja para recibir pagos."
                 })
+            
+            # Buscar configuración del método de pago
+            if metodo_pago_id:
+                metodo_config = MetodoPagoConfig.objects.filter(id=metodo_pago_id, empresa=empresa).first()
+            elif metodo_pago_str:
+                # Intento de fallback inteligente: buscar por código
+                metodo_config = MetodoPagoConfig.objects.filter(
+                    codigo_metodo=metodo_pago_str.upper(), 
+                    empresa=empresa
+                ).first()
 
-        ticket = Ticket.objects.create(**validated_data)
+        # Crear Ticket (Asignando empresa y usuario)
+        ticket = Ticket.objects.create(
+            empresa=empresa,
+            creado_por=user,
+            **validated_data
+        )
         
+        # Crear Items
         for item_data in items_data:
-            TicketItem.objects.create(ticket=ticket, **item_data)
+            TicketItem.objects.create(
+                ticket=ticket, 
+                empresa=empresa, 
+                creado_por=user, 
+                **item_data
+            )
         
-        if pago_monto is not None and float(pago_monto) > 0:
-            from pagos.models import Pago
+        # Registrar Pago Inicial
+        if pago_monto and float(pago_monto) > 0:
             Pago.objects.create(
                 ticket=ticket,
                 caja=caja_abierta,
                 monto=pago_monto,
-                metodo_pago=metodo_pago,
+                metodo_pago_config=metodo_config,
+                metodo_pago_snapshot=metodo_config.nombre_mostrar if metodo_config else (metodo_pago_str or "EFECTIVO"),
                 estado='PAGADO',
                 referencia=f'Pago inicial Ticket {ticket.numero_ticket}',
+                empresa=empresa,
                 creado_por=user
             )
         
