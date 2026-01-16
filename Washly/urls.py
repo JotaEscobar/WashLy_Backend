@@ -15,9 +15,14 @@ from servicios.views import (
     CategoriaServicioViewSet, ServicioViewSet, TipoPrendaViewSet,
     PrendaViewSet, PromocionViewSet
 )
+from core.views import EmpresaViewSet, SedeViewSet
 
 # Router principal
 router = DefaultRouter()
+
+# Core (SaaS)
+router.register(r'core/empresa', EmpresaViewSet, basename='empresa')
+router.register(r'core/sedes', SedeViewSet, basename='sede')
 
 # Registrar rutas de tickets
 router.register(r'clientes', ClienteViewSet, basename='cliente')
