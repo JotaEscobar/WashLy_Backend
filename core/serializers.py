@@ -7,7 +7,10 @@ class EmpresaSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'nombre', 'ruc', 'direccion_fiscal', 
             'logo', 'moneda', 'plan', 'estado', 
-            'telefono_contacto', 'email_contacto'
+            'telefono_contacto', 'email_contacto',
+            # Nuevos campos de configuración
+            'ticket_prefijo', 'ticket_dias_entrega', 'ticket_mensaje_pie',
+            'stock_minimo_global', 'notif_email_activas'
         ]
         read_only_fields = ['plan', 'estado', 'fecha_vencimiento']
 

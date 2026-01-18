@@ -42,6 +42,11 @@ class Empresa(models.Model):
     fecha_vencimiento = models.DateTimeField(verbose_name="Fecha de Vencimiento")
     estado = models.CharField(max_length=20, choices=ESTADOS, default='ACTIVO')
 
+    # --- NUEVO: Configuración de Tickets ---
+    ticket_prefijo = models.CharField(max_length=10, default='TK-', verbose_name="Prefijo del Ticket")
+    ticket_dias_entrega = models.PositiveIntegerField(default=2, verbose_name="Días defecto para entrega")
+    ticket_mensaje_pie = models.TextField(blank=True, verbose_name="Mensaje al pie del ticket")
+
     # Configuración Global de Inventario y Notificaciones
     stock_minimo_global = models.PositiveIntegerField(default=10, verbose_name="Alerta Stock Mínimo Global")
     
