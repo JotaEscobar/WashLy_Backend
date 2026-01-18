@@ -1,6 +1,6 @@
 """
 Serializers para la app servicios
-Actualizado para SaaS (Multi-tenant) y Lógica de Precios corregida
+Actualizado para SaaS (Multi-tenant)
 """
 
 from rest_framework import serializers
@@ -19,7 +19,6 @@ class CategoriaServicioSerializer(serializers.ModelSerializer):
             'id', 'nombre', 'descripcion', 'icono', 'orden',
             'activo', 'cantidad_servicios', 'creado_en'
         ]
-        # SAAS: empresa y creado_por son automáticos, no se editan
         read_only_fields = ['creado_en', 'empresa', 'creado_por']
     
     def get_cantidad_servicios(self, obj):
@@ -67,7 +66,7 @@ class ServicioSerializer(serializers.ModelSerializer):
         model = Servicio
         fields = [
             'id', 'nombre', 'codigo', 'descripcion', 'categoria',
-            'categoria_nombre', 'tipo_cobro', 'precio_base', 'tiempo_estimado', # Agregado tipo_cobro
+            'categoria_nombre', 'tipo_cobro', 'precio_base', 'tiempo_estimado', 
             'requiere_prenda', 'disponible', 'sedes', 'sedes_nombres',
             'precios_prendas', 'activo', 'creado_en'
         ]
@@ -87,7 +86,7 @@ class ServicioListSerializer(serializers.ModelSerializer):
             'id', 'nombre', 'codigo', 
             'categoria',
             'categoria_nombre', 
-            'tipo_cobro', # Importante para el frontend saber si muestra selector de prendas
+            'tipo_cobro', 
             'precio_base', 'disponible'
         ]
 
@@ -115,6 +114,5 @@ class CalcularPrecioSerializer(serializers.Serializer):
     """Serializer para calcular precios"""
     servicio_id = serializers.IntegerField()
     prenda_id = serializers.IntegerField(required=False, allow_null=True)
-    # Cambiado a Decimal para soportar pesaje (ej. 1.5 kilos)
     cantidad = serializers.DecimalField(max_digits=10, decimal_places=2, default=1) 
     promocion_codigo = serializers.CharField(required=False, allow_blank=True)

@@ -31,6 +31,8 @@ class BaseTenantViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         # Asigna la empresa automáticamente al crear
+        # NOTA: Esto asume que el modelo tiene 'creado_por'. 
+        # Si no lo tiene, se debe sobreescribir este método en la ViewSet hija.
         serializer.save(
             empresa=self.request.user.perfil.empresa,
             creado_por=self.request.user
@@ -39,8 +41,16 @@ class BaseTenantViewSet(viewsets.ModelViewSet):
 
 class MetodoPagoConfigViewSet(BaseTenantViewSet):
     """CRUD para configurar métodos de pago (Yape, Plin, Bancos)"""
-    queryset = MetodoPagoConfig.objects.filter(activo=True)
+    # Agregamos order_by para evitar el UnorderedObjectListWarning
+    queryset = MetodoPagoConfig.objects.filter(activo=True).order_by('id')
     serializer_class = MetodoPagoConfigSerializer
+
+    def perform_create(self, serializer):
+        # SOBREESCRIBIMOS EL METODO PADRE
+        # MetodoPagoConfig NO tiene campo 'creado_por', así que solo guardamos la empresa.
+        serializer.save(
+            empresa=self.request.user.perfil.empresa
+        )
 
 
 class PagoViewSet(BaseTenantViewSet):
