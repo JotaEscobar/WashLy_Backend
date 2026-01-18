@@ -16,6 +16,8 @@ from servicios.views import (
     PrendaViewSet, PromocionViewSet
 )
 from core.views import EmpresaViewSet, SedeViewSet
+# --- NUEVO: Importar vista de usuarios ---
+from usuarios.views import UsuarioViewSet
 
 # Router principal
 router = DefaultRouter()
@@ -35,6 +37,9 @@ router.register(r'servicios', ServicioViewSet, basename='servicio')
 router.register(r'tipos-prenda', TipoPrendaViewSet, basename='tipo-prenda')
 router.register(r'prendas', PrendaViewSet, basename='prenda')
 router.register(r'promociones', PromocionViewSet, basename='promocion')
+
+# --- NUEVO: Registrar ruta de usuarios ---
+router.register(r'usuarios', UsuarioViewSet, basename='usuario')
 
 urlpatterns = [
     # Admin
