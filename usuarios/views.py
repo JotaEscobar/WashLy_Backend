@@ -3,10 +3,11 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
 from django.contrib.auth.models import User
 from .serializers import UsuarioSerializer
+from core.permissions import IsActiveSubscription # <--- NUEVO IMPORT
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     serializer_class = UsuarioSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsActiveSubscription] # <--- APLICADO
 
     def get_queryset(self):
         # FILTRO DE SEGURIDAD: Solo devolver usuarios de la misma empresa

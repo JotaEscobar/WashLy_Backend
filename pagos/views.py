@@ -11,6 +11,8 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 import json
 
+from core.permissions import IsActiveSubscription # <--- NUEVO IMPORT
+
 from .models import Pago, CajaSesion, MovimientoCaja, MetodoPagoConfig
 from .serializers import (
     PagoSerializer, CajaSesionSerializer, MovimientoCajaSerializer, 
@@ -21,7 +23,9 @@ class BaseTenantViewSet(viewsets.ModelViewSet):
     """
     Clase base para asegurar que todo se filtre por la empresa del usuario.
     """
-    permission_classes = [permissions.IsAuthenticated]
+    # IsActiveSubscription detectará internamente que estamos en /pagos y PERMITIRÁ el acceso
+    # para que puedan pagar su renovación.
+    permission_classes = [permissions.IsAuthenticated, IsActiveSubscription]
     
     def get_queryset(self):
         # Filtra siempre por la empresa del usuario logueado
@@ -30,9 +34,6 @@ class BaseTenantViewSet(viewsets.ModelViewSet):
         )
     
     def perform_create(self, serializer):
-        # Asigna la empresa automáticamente al crear
-        # NOTA: Esto asume que el modelo tiene 'creado_por'. 
-        # Si no lo tiene, se debe sobreescribir este método en la ViewSet hija.
         serializer.save(
             empresa=self.request.user.perfil.empresa,
             creado_por=self.request.user
@@ -41,13 +42,10 @@ class BaseTenantViewSet(viewsets.ModelViewSet):
 
 class MetodoPagoConfigViewSet(BaseTenantViewSet):
     """CRUD para configurar métodos de pago (Yape, Plin, Bancos)"""
-    # Agregamos order_by para evitar el UnorderedObjectListWarning
     queryset = MetodoPagoConfig.objects.filter(activo=True).order_by('id')
     serializer_class = MetodoPagoConfigSerializer
 
     def perform_create(self, serializer):
-        # SOBREESCRIBIMOS EL METODO PADRE
-        # MetodoPagoConfig NO tiene campo 'creado_por', así que solo guardamos la empresa.
         serializer.save(
             empresa=self.request.user.perfil.empresa
         )
@@ -64,7 +62,6 @@ class PagoViewSet(BaseTenantViewSet):
         user = self.request.user
         empresa = user.perfil.empresa
         
-        # Validar caja abierta EN MI EMPRESA
         caja_abierta = CajaSesion.objects.filter(
             usuario=user, 
             empresa=empresa, 
@@ -84,9 +81,8 @@ class PagoViewSet(BaseTenantViewSet):
 
     @action(detail=True, methods=['post'])
     def anular(self, request, pk=None):
-        pago = self.get_object() # get_object ya usa get_queryset que filtra por empresa
+        pago = self.get_object()
         
-        # Validar fecha con timezone local
         now_local = timezone.localtime(timezone.now())
         pago_local = timezone.localtime(pago.fecha_pago)
         
@@ -110,14 +106,11 @@ class CajaViewSet(BaseTenantViewSet):
     serializer_class = CajaSesionSerializer
 
     def get_queryset(self):
-        # 1. Filtro base por empresa (del BaseTenantViewSet)
         queryset = super().get_queryset()
         
-        # 2. Filtros de fecha adicionales
         fecha_desde = self.request.query_params.get('fecha_desde')
         fecha_hasta = self.request.query_params.get('fecha_hasta')
         
-        # Filtrado robusto con Timezone Aware (Perú)
         if fecha_desde:
             dt_start = datetime.strptime(fecha_desde, '%Y-%m-%d').date()
             start_aware = timezone.make_aware(datetime.combine(dt_start, time.min))
@@ -130,7 +123,6 @@ class CajaViewSet(BaseTenantViewSet):
             
         return queryset
 
-    # Helper para construir timeline de una caja específica
     def _build_timeline_events(self, caja):
         events = []
         def safe_json(val):
@@ -164,12 +156,10 @@ class CajaViewSet(BaseTenantViewSet):
             if p.estado == 'ANULADO':
                 desc += " (ANULADO)"
             
-            # Nombre del cliente
             cliente_nombre = "N/A"
             if hasattr(p.ticket, 'cliente') and p.ticket.cliente:
                 cliente_nombre = f"{p.ticket.cliente.nombres} {p.ticket.cliente.apellidos}".strip()
             
-            # Obtener nombre del método dinámico o snapshot
             metodo_nombre = p.metodo_pago_snapshot or (p.metodo_pago_config.nombre_mostrar if p.metodo_pago_config else "N/A")
 
             events.append({
@@ -191,7 +181,6 @@ class CajaViewSet(BaseTenantViewSet):
             tipo_texto = "Gasto" if m.tipo == 'EGRESO' else "Ingreso"
             desc = f"{tipo_texto} - {m.categoria}: {m.descripcion}"
             
-            # Obtener nombre del método (o EFECTIVO si es null)
             metodo_nombre = m.metodo_pago_config.nombre_mostrar if m.metodo_pago_config else "EFECTIVO"
             
             events.append({
@@ -210,7 +199,6 @@ class CajaViewSet(BaseTenantViewSet):
         # 4. Cierre
         if caja.fecha_cierre and caja.estado == 'CERRADA':
             cierre_detalle = safe_json(caja.detalle_cierre)
-            # Excluir claves internas si es necesario
             cierre_detalle_filtrado = {k: v for k, v in cierre_detalle.items() if k != 'TRANSFERENCIA'}
             
             events.append({
@@ -231,7 +219,7 @@ class CajaViewSet(BaseTenantViewSet):
     def mi_caja(self, request):
         caja = CajaSesion.objects.filter(
             usuario=request.user, 
-            empresa=request.user.perfil.empresa, # Filtro SaaS
+            empresa=request.user.perfil.empresa, 
             estado='ABIERTA'
         ).first()
         if caja:
@@ -241,7 +229,7 @@ class CajaViewSet(BaseTenantViewSet):
     @action(detail=False, methods=['get'])
     def ultimo_cierre(self, request):
         ultima_caja = CajaSesion.objects.filter(
-            empresa=request.user.perfil.empresa, # Filtro SaaS
+            empresa=request.user.perfil.empresa, 
             estado='CERRADA'
         ).order_by('-fecha_cierre').first()
         
@@ -263,7 +251,7 @@ class CajaViewSet(BaseTenantViewSet):
         
         caja = CajaSesion.objects.create(
             usuario=request.user,
-            empresa=empresa, # Asignación SaaS
+            empresa=empresa, 
             monto_inicial=monto_inicial,
             detalle_apertura=json.dumps(detalle) if isinstance(detalle, dict) else str(detalle),
             estado='ABIERTA',
@@ -274,7 +262,7 @@ class CajaViewSet(BaseTenantViewSet):
 
     @action(detail=True, methods=['post'])
     def cerrar(self, request, pk=None):
-        caja = self.get_object() # Ya filtra por empresa
+        caja = self.get_object() 
         
         caja.monto_final_real = Decimal(str(request.data.get('monto_real', 0)))
         caja.comentarios = request.data.get('comentarios', '')
@@ -295,7 +283,6 @@ class CajaViewSet(BaseTenantViewSet):
         if caja.estado != 'ABIERTA':
              return Response({'error': 'Caja cerrada'}, status=400)
 
-        # Buscar config del método de pago si se envía ID
         metodo_id = request.data.get('metodo_pago_id')
         metodo_config = None
         if metodo_id:
@@ -306,11 +293,10 @@ class CajaViewSet(BaseTenantViewSet):
 
         MovimientoCaja.objects.create(
             caja=caja,
-            empresa=caja.empresa, # Asignación SaaS
+            empresa=caja.empresa, 
             tipo=request.data.get('tipo'),
             monto=request.data.get('monto'),
-            metodo_pago_config=metodo_config, # Asignación dinámica
-            # 'metodo_pago' (string antiguo) se puede mantener por compatibilidad o eliminar
+            metodo_pago_config=metodo_config,
             descripcion=request.data.get('descripcion', ''), 
             categoria=request.data.get('categoria', 'GENERAL'),
             creado_por=request.user
@@ -324,21 +310,16 @@ class CajaViewSet(BaseTenantViewSet):
         events.sort(key=lambda x: x['hora_raw'] if x['hora_raw'] else timezone.now())
         return Response(events)
 
-    # =============================================================================
-    # DIARIO CONSOLIDADO - SAAS SAFE
-    # =============================================================================
     @action(detail=False, methods=['get'])
     def diario(self, request):
         fecha_desde_str = request.query_params.get('fecha_desde')
         fecha_hasta_str = request.query_params.get('fecha_hasta')
         empresa_actual = request.user.perfil.empresa
         
-        # 1. Fechas
         now_local = timezone.localtime(timezone.now())
         dt_start = datetime.strptime(fecha_desde_str, '%Y-%m-%d').date() if fecha_desde_str else now_local.date()
         dt_end = datetime.strptime(fecha_hasta_str, '%Y-%m-%d').date() if fecha_hasta_str else now_local.date()
 
-        # 2. Rango Timezone-aware
         start_naive = datetime.combine(dt_start, time.min)
         start_aware = timezone.make_aware(start_naive)
         
@@ -351,11 +332,6 @@ class CajaViewSet(BaseTenantViewSet):
             try: return json.loads(val) if val else {}
             except: return {}
 
-        print(f"[DIARIO] Buscando movimientos para {empresa_actual} desde {start_aware} hasta {end_aware}")
-
-        # =======================================================================
-        # 3. BUSCAR PAGOS (Filtrado por empresa)
-        # =======================================================================
         pagos = Pago.objects.filter(
             empresa=empresa_actual,
             fecha_pago__gte=start_aware,
@@ -386,9 +362,6 @@ class CajaViewSet(BaseTenantViewSet):
                 }
             })
 
-        # =======================================================================
-        # 4. BUSCAR MOVIMIENTOS MANUALES (Filtrado por empresa)
-        # =======================================================================
         movimientos = MovimientoCaja.objects.filter(
             empresa=empresa_actual,
             creado_en__gte=start_aware,
@@ -418,9 +391,6 @@ class CajaViewSet(BaseTenantViewSet):
                 }
             })
 
-        # =======================================================================
-        # 5. BUSCAR APERTURAS (Filtrado por empresa)
-        # =======================================================================
         aperturas = CajaSesion.objects.filter(
             empresa=empresa_actual,
             fecha_apertura__gte=start_aware,
@@ -447,9 +417,6 @@ class CajaViewSet(BaseTenantViewSet):
                 'detalles': apertura_detalle
             })
 
-        # =======================================================================
-        # 6. BUSCAR CIERRES (Filtrado por empresa)
-        # =======================================================================
         cierres = CajaSesion.objects.filter(
             empresa=empresa_actual,
             fecha_cierre__gte=start_aware,
@@ -474,8 +441,5 @@ class CajaViewSet(BaseTenantViewSet):
                 'detalles': cierre_detalle_filtrado
             })
 
-        # =======================================================================
-        # 7. ORDENAR Y RETORNAR
-        # =======================================================================
         events.sort(key=lambda x: x['hora_raw'] if x['hora_raw'] else timezone.now())
         return Response(events)

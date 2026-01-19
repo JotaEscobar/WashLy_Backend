@@ -11,6 +11,8 @@ from django.db.models import Q, Sum, F, DecimalField, OuterRef, Subquery, Max
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
+from core.permissions import IsActiveSubscription # <--- NUEVO IMPORT
+
 from .models import Cliente, Ticket, TicketItem, EstadoHistorial
 from .serializers import (
     ClienteSerializer, ClienteListSerializer, ClienteCRMSerializer,
@@ -20,7 +22,8 @@ from .serializers import (
 
 class BaseTenantViewSet(viewsets.ModelViewSet):
     """Clase base para asegurar filtrado por empresa en todas las vistas"""
-    permission_classes = [IsAuthenticated]
+    # El Kill-Switch se aplica aquí para toda la app de Tickets
+    permission_classes = [IsAuthenticated, IsActiveSubscription]
 
     def get_queryset(self):
         # Filtra siempre por la empresa del usuario logueado
@@ -52,8 +55,6 @@ class ClienteViewSet(BaseTenantViewSet):
         queryset = super().get_queryset()
         
         # 2. Optimización CRM: Anotamos la fecha del último ticket
-        # IMPORTANTE: Django ya filtra los tickets relacionados por la FK, 
-        # pero es bueno asegurarse que la relación inversa respete el tenant si hubiera integridad débil.
         queryset = queryset.annotate(
             ultima_visita=Max('tickets__fecha_recepcion')
         )
@@ -88,8 +89,6 @@ class ClienteViewSet(BaseTenantViewSet):
     
     @action(detail=True, methods=['post'])
     def restore(self, request, pk=None):
-        # Para restaurar necesitamos buscar incluso los inactivos
-        # Sobreescribimos momentáneamente la consulta base
         try:
             cliente = Cliente.objects.get(
                 pk=pk, 
@@ -131,7 +130,7 @@ class TicketViewSet(BaseTenantViewSet):
         # Subquery: Último método de pago (de ESTA empresa)
         ult_pago = Pago.objects.filter(
             ticket=OuterRef('pk'),
-            empresa=self.request.user.perfil.empresa, # Filtro SaaS explícito
+            empresa=self.request.user.perfil.empresa, 
             estado='PAGADO'
         ).order_by('-fecha_pago')
 
@@ -178,28 +177,21 @@ class TicketViewSet(BaseTenantViewSet):
         return queryset
     
     def list(self, request, *args, **kwargs):
-        # Inyectamos el método de pago en la respuesta JSON
         response = super().list(request, *args, **kwargs)
         data_list = response.data['results'] if 'results' in response.data else response.data
         
-        # Mapeo eficiente ID -> Metodo
-        # Usamos filter_queryset para reutilizar la lógica de get_queryset (que ya trae la anotación)
         tickets_filtrados = self.filter_queryset(self.get_queryset())
         ticket_map = {t.id: t.ultimo_metodo_pago for t in tickets_filtrados}
         
-        # Iteramos la lista serializada para inyectar el valor
-        # Ojo: si hay paginación, data_list es solo la página actual, lo cual es correcto.
         if isinstance(data_list, list):
             for item in data_list:
                 item['ultimo_metodo_pago'] = ticket_map.get(item['id'])
             
         return response
 
-    # perform_create y perform_update ya están en BaseTenantViewSet
-    
     @action(detail=True, methods=['post'])
     def update_estado(self, request, pk=None):
-        ticket = self.get_object() # Filtro SaaS implícito
+        ticket = self.get_object() 
         serializer = TicketUpdateEstadoSerializer(data=request.data, context={'ticket': ticket})
         
         if serializer.is_valid():
@@ -218,10 +210,10 @@ class TicketViewSet(BaseTenantViewSet):
             
             EstadoHistorial.objects.create(
                 ticket=ticket,
-                empresa=ticket.empresa, # Vital para SaaS
+                empresa=ticket.empresa, 
                 estado_anterior=estado_anterior,
                 estado_nuevo=nuevo_estado,
-                usuario=request.user, # Se guardará como creado_por
+                usuario=request.user, 
                 comentario=comentario
             )
             
@@ -250,8 +242,6 @@ class TicketViewSet(BaseTenantViewSet):
     @action(detail=True, methods=['get'])
     def imprimir(self, request, pk=None):
         ticket = self.get_object()
-        # Aquí podrías agregar lógica para obtener la configuración de impresión de la empresa
-        # config = ticket.empresa.config_tickets 
         serializer = TicketSerializer(ticket, context={'request': request})
         return Response({'ticket': serializer.data, 'mensaje': 'Datos para impresión'})
     
@@ -277,7 +267,6 @@ class TicketViewSet(BaseTenantViewSet):
     
     @action(detail=False, methods=['get'])
     def dashboard(self, request):
-        # self.get_queryset() YA FILTRA POR EMPRESA, así que es seguro usarlo.
         tickets_activos = self.get_queryset()
         
         stats = {
@@ -300,13 +289,12 @@ class TicketItemViewSet(BaseTenantViewSet):
         queryset = super().get_queryset()
         ticket_id = self.request.query_params.get('ticket', None)
         if ticket_id:
-            # Validar que el ticket pertenezca a la empresa
             queryset = queryset.filter(ticket_id=ticket_id, ticket__empresa=self.request.user.perfil.empresa)
         return queryset
     
     @action(detail=True, methods=['post'])
     def marcar_completado(self, request, pk=None):
-        item = self.get_object() # Filtro SaaS implícito
+        item = self.get_object() 
         item.completado = True
         item.save()
         return Response({'status': 'Item marcado como completado'})
