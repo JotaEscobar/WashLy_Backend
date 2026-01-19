@@ -1,29 +1,28 @@
 from rest_framework import serializers
-from django.contrib.auth.models import User
-from .models import Empresa, Sede, PerfilUsuario
+from .models import Empresa, Sede
 
 class EmpresaSerializer(serializers.ModelSerializer):
+    direccion = serializers.CharField(source='direccion_fiscal', required=False, allow_blank=True)
+    telefono = serializers.CharField(source='telefono_contacto', required=False, allow_blank=True)
+    activo = serializers.SerializerMethodField()
+
     class Meta:
         model = Empresa
-        # Eliminamos 'plan', mantenemos fecha_vencimiento
-        fields = ['id', 'nombre', 'ruc', 'direccion', 'telefono', 'fecha_vencimiento', 'activo']
+        fields = [
+            'id', 'nombre', 'ruc', 'direccion_fiscal', 
+            'logo', 'moneda', 'plan', 'estado', 
+            'telefono_contacto', 'email_contacto',
+            'ticket_prefijo', 'ticket_dias_entrega', 'ticket_mensaje_pie',
+            'stock_minimo_global', 'notif_email_activas',
+            'direccion', 'telefono', 'activo'
+        ]
+        read_only_fields = ['plan', 'fecha_vencimiento']
+
+    def get_activo(self, obj):
+        return obj.estado == 'ACTIVO'
 
 class SedeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Sede
-        fields = ['id', 'nombre', 'direccion', 'activo', 'empresa']
-
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name']
-
-class PerfilUsuarioSerializer(serializers.ModelSerializer):
-    # Aquí usamos los serializers definidos arriba
-    user = UserSerializer(read_only=True)
-    empresa = EmpresaSerializer(read_only=True)
-    sede = SedeSerializer(read_only=True)
-
-    class Meta:
-        model = PerfilUsuario
-        fields = ['id', 'user', 'empresa', 'sede', 'rol', 'telefono']
+        fields = '__all__'
+        read_only_fields = ['empresa', 'creado_por', 'actualizado_por']

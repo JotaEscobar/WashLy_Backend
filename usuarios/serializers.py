@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from .models import PerfilUsuario
 from core.models import Sede
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 class UsuarioSerializer(serializers.ModelSerializer):
     """
@@ -79,3 +80,38 @@ class UsuarioSerializer(serializers.ModelSerializer):
             instance.set_password(password)
             
         return super().update(instance, validated_data)
+    
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """
+    Serializer personalizado para devolver datos del usuario junto con el token JWT.
+    """
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        
+        # Obtener datos extra del usuario
+        user = self.user
+        data['id'] = user.id
+        data['username'] = user.username
+        data['email'] = user.email
+        data['first_name'] = user.first_name
+        data['last_name'] = user.last_name
+        
+        # Datos del Perfil (Empresa y Rol)
+        try:
+            perfil = user.perfil
+            data['rol'] = perfil.rol
+            data['empresa'] = {
+                'id': perfil.empresa.id,
+                'nombre': perfil.empresa.nombre,
+                'fecha_vencimiento': perfil.empresa.fecha_vencimiento
+            }
+            if perfil.sede:
+                data['sede'] = {
+                    'id': perfil.sede.id,
+                    'nombre': perfil.sede.nombre
+                }
+        except PerfilUsuario.DoesNotExist:
+            data['rol'] = 'N/A'
+            data['empresa'] = None
+
+        return data

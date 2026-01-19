@@ -1,9 +1,13 @@
+from rest_framework_simplejwt.views import TokenObtainPairView
+from .serializers import CustomTokenObtainPairSerializer, UsuarioSerializer
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError
 from django.contrib.auth.models import User
-from .serializers import UsuarioSerializer
-from core.permissions import IsActiveSubscription # <--- NUEVO IMPORT
+from core.permissions import IsActiveSubscription
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """Vista de Login que devuelve Token + Rol + Datos de Empresa"""
+    serializer_class = CustomTokenObtainPairSerializer
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     serializer_class = UsuarioSerializer
