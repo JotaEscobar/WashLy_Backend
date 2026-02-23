@@ -22,7 +22,7 @@ INSTALLED_APPS = [
     
     # Third party
     'rest_framework',
-    'rest_framework_simplejwt', # <--- NECESARIO PARA LOGIN
+    'rest_framework_simplejwt.token_blacklist',  # ✅ Para invalidar tokens
     'corsheaders',
     'django_celery_beat',
     
@@ -88,12 +88,24 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# --- QR CODE ---
+QR_CODE_VERSION = 1
+QR_CODE_ERROR_CORRECTION = 'L'
+QR_CODE_BOX_SIZE = 10
+QR_CODE_BORDER = 4
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CORS_ALLOW_ALL_ORIGINS = True
+
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'x-current-sede-id',
+]
 
 # --- CONFIGURACIÓN DE SEGURIDAD (JWT) ---
 REST_FRAMEWORK = {

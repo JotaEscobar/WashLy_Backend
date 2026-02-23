@@ -7,7 +7,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Q, Sum, F, DecimalField, OuterRef, Subquery, Max
+from django.db.models import Q, Sum, F, DecimalField, OuterRef, Subquery, Max, Count, Prefetch  # ✅ Agregados Count y Prefetch
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -19,27 +19,44 @@ from .serializers import (
     TicketSerializer, TicketListSerializer, TicketCreateSerializer,
     TicketItemSerializer, EstadoHistorialSerializer, TicketUpdateEstadoSerializer
 )
+from core.mixins import resolver_sede_desde_request
 
 class BaseTenantViewSet(viewsets.ModelViewSet):
-    """Clase base para asegurar filtrado por empresa en todas las vistas"""
-    # El Kill-Switch se aplica aquí para toda la app de Tickets
+    """Clase base para asegurar filtrado por empresa y sede en todas las vistas"""
     permission_classes = [IsAuthenticated, IsActiveSubscription]
 
     def get_queryset(self):
         # Filtra siempre por la empresa del usuario logueado
-        # Excluye eliminados (soft delete) si el modelo lo soporta
-        return self.queryset.model.objects.filter(
+        queryset = self.queryset.model.objects.filter(
             empresa=self.request.user.perfil.empresa,
             activo=True
         )
+        
+        # Filtro por Sede (resuelve header X-Current-Sede-ID a nivel de view/DRF)
+        sede = resolver_sede_desde_request(self.request)
+        if sede and hasattr(self.queryset.model, 'sede'):
+            queryset = queryset.filter(sede=sede)
+                
+        return queryset
 
     def perform_create(self, serializer):
-        serializer.save(
-            empresa=self.request.user.perfil.empresa,
-            creado_por=self.request.user
-        )
+        save_kwargs = {
+            'empresa': self.request.user.perfil.empresa,
+            'creado_por': self.request.user
+        }
+        
+        # Asignar sede si existe en contexto
+        sede = resolver_sede_desde_request(self.request)
+        if sede and hasattr(self.queryset.model, 'sede'):
+            save_kwargs['sede'] = sede
+               
+        serializer.save(**save_kwargs)
     
     def perform_update(self, serializer):
+        # Prevenir cambio de sede
+        if 'sede' in serializer.validated_data:
+            serializer.validated_data.pop('sede')
+            
         serializer.save(actualizado_por=self.request.user)
 
 
@@ -59,11 +76,20 @@ class ClienteViewSet(BaseTenantViewSet):
             ultima_visita=Max('tickets__fecha_recepcion')
         )
         
-        # 3. Prefetch para listado (evitar N+1 queries)
+        # 3. ✅ Optimización N+1: Solo anotar en listado, prefetch en detalle
         if self.action == 'list':
+            # En listado: solo select_related para empresa y agregados
+            queryset = queryset.select_related('empresa')
+            # Anotar total de tickets y gasto total (sin cargar objetos completos)
+            queryset = queryset.annotate(
+                total_tickets=Count('tickets'),
+                total_gastado=Sum('tickets__pagos__monto', filter=Q(tickets__pagos__estado='PAGADO'))
+            )
+        elif self.action == 'retrieve':
+            # ✅ En detalle: sí cargar relaciones completas
             queryset = queryset.prefetch_related(
-                'tickets', 
-                'tickets__items', 
+                Prefetch('tickets', queryset=Ticket.objects.filter(activo=True).select_related('sede', 'empleado_asignado')),
+                'tickets__items',
                 'tickets__pagos'
             )
             
@@ -120,6 +146,12 @@ class TicketViewSet(BaseTenantViewSet):
             return TicketUpdateEstadoSerializer
         return TicketSerializer
     
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if not serializer.is_valid():
+            print("🚨 ERROR DE VALIDACION:", serializer.errors)
+        return super().create(request, *args, **kwargs)
+
     def get_queryset(self):
         # 1. Filtro base por empresa
         queryset = super().get_queryset()
@@ -213,7 +245,7 @@ class TicketViewSet(BaseTenantViewSet):
                 empresa=ticket.empresa, 
                 estado_anterior=estado_anterior,
                 estado_nuevo=nuevo_estado,
-                usuario=request.user, 
+                creado_por=request.user, 
                 comentario=comentario
             )
             
@@ -260,7 +292,7 @@ class TicketViewSet(BaseTenantViewSet):
             empresa=ticket.empresa,
             estado_anterior=estado_anterior,
             estado_nuevo='CANCELADO',
-            usuario=request.user,
+            creado_por=request.user,
             comentario=request.data.get('motivo', 'Ticket cancelado')
         )
         return Response({'status': 'Ticket cancelado'})

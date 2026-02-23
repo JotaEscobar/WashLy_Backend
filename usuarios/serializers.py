@@ -35,44 +35,45 @@ class UsuarioSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
+        """Crea usuario utilizando el servicio centralizado"""
         # Extraer datos anidados del perfil
         perfil_data = validated_data.pop('perfil')
         password = validated_data.pop('password')
         
-        # 1. Generar Username: Primera letra nombre + apellido
-        base_username = f"{validated_data['first_name'][0]}{validated_data['last_name']}".lower().replace(" ", "")
-        username = base_username
-        counter = 1
-        while User.objects.filter(username=username).exists():
-            username = f"{base_username}{counter}"
-            counter += 1
-        
-        # 2. Crear Usuario Django
-        user = User.objects.create_user(username=username, password=password, **validated_data)
-        
-        # 3. Crear Perfil (Asignamos la empresa del usuario que hace la petición en la Vista)
+        # Obtener empresa del contexto
         request = self.context.get('request')
         empresa = request.user.perfil.empresa
         
-        PerfilUsuario.objects.create(
-            usuario=user,
+        # ✅ Usar servicio en lugar de lógica inline
+        from .services import UserService
+        
+        user = UserService.create_user_with_profile(
+            first_name=validated_data['first_name'],
+            last_name=validated_data['last_name'],
+            email=validated_data.get('email', ''),
+            password=password,
             empresa=empresa,
             rol=perfil_data.get('rol'),
-            sede=perfil_data.get('sede')
+            sede=perfil_data.get('sede'),
+            created_by=request.user
         )
+        
         return user
 
     def update(self, instance, validated_data):
+        """Actualiza usuario utilizando el servicio centralizado"""
+        from .services import UserService
+        
         # Actualizar datos de Perfil
         if 'perfil' in validated_data:
             perfil_data = validated_data.pop('perfil')
-            perfil = instance.perfil
             
-            if 'rol' in perfil_data:
-                perfil.rol = perfil_data['rol']
-            if 'sede' in perfil_data: # Puede venir None para quitar sede
-                perfil.sede = perfil_data['sede']
-            perfil.save()
+            UserService.update_user_profile(
+                user=instance,
+                rol=perfil_data.get('rol'),
+                sede=perfil_data.get('sede'),
+                updated_by=self.context.get('request').user
+            )
             
         # Actualizar Password si viene
         if 'password' in validated_data:
@@ -95,6 +96,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['email'] = user.email
         data['first_name'] = user.first_name
         data['last_name'] = user.last_name
+        data['is_staff'] = user.is_staff
+        data['is_superuser'] = user.is_superuser
         
         # Datos del Perfil (Empresa y Rol)
         try:
@@ -110,8 +113,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                     'id': perfil.sede.id,
                     'nombre': perfil.sede.nombre
                 }
-        except PerfilUsuario.DoesNotExist:
-            data['rol'] = 'N/A'
+        except Exception:
+            # Fallback para superusuarios sin perfil de lavandería
+            data['rol'] = 'ADMIN_GLOBAL' if user.is_superuser else 'STAFF'
             data['empresa'] = None
 
         return data

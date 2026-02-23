@@ -1,12 +1,14 @@
 """
 Tareas asíncronas para notificaciones
 """
-
+import logging
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
+from django.db import models
 
+logger = logging.getLogger(__name__)
 
 @shared_task
 def enviar_notificacion_ticket(ticket_id, mensaje, canales=None):
@@ -40,7 +42,7 @@ def enviar_notificacion_ticket(ticket_id, mensaje, canales=None):
                 )
     
     except Exception as e:
-        print(f"Error en enviar_notificacion_ticket: {e}")
+        logger.error(f"Error en enviar_notificacion_ticket: {e}")
 
 
 @shared_task
@@ -82,6 +84,7 @@ def enviar_email(ticket_id, destinatario, asunto, mensaje):
         return True
     
     except Exception as e:
+        logger.error(f"Error enviando email: {e}")
         if 'notif' in locals():
             notif.estado = 'ERROR'
             notif.error_mensaje = str(e)
@@ -111,17 +114,8 @@ def enviar_whatsapp(ticket_id, destinatario, mensaje):
             estado='PENDIENTE'
         )
         
-        # Aquí iría la integración real con Twilio
-        # from twilio.rest import Client
-        # client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
-        # message = client.messages.create(
-        #     from_=f"whatsapp:{settings.TWILIO_WHATSAPP_FROM}",
-        #     to=f"whatsapp:{destinatario}",
-        #     body=mensaje
-        # )
-        
         # Por ahora, solo simulamos el envío
-        print(f"[WHATSAPP SIMULADO] A: {destinatario} - Mensaje: {mensaje}")
+        logger.info(f"[WHATSAPP SIMULADO] A: {destinatario} - Mensaje: {mensaje}")
         
         # Actualizar estado
         notif.estado = 'ENVIADO'
@@ -131,6 +125,7 @@ def enviar_whatsapp(ticket_id, destinatario, mensaje):
         return True
     
     except Exception as e:
+        logger.error(f"Error enviando WhatsApp: {e}")
         if 'notif' in locals():
             notif.estado = 'ERROR'
             notif.error_mensaje = str(e)
@@ -167,4 +162,4 @@ def verificar_alertas_stock():
             )
             
             # Enviar notificación a administradores
-            print(f"[ALERTA] Stock {nivel} de {producto.nombre}: {producto.stock_actual} {producto.unidad_medida}")
+            logger.warning(f"[ALERTA] Stock {nivel} de {producto.nombre}: {producto.stock_actual} {producto.unidad_medida}")

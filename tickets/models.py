@@ -8,6 +8,7 @@ from django.contrib.auth.models import User
 from core.models import AuditModel, SoftDeleteModel, Sede, Empresa, TimeStampedModel
 from core.utils import generar_numero_unico, generar_qr_code
 from django.utils import timezone
+from .constants import TicketEstados, TicketPrioridades  # ✅ Importar constantes
 
 
 class ConfiguracionTicket(TimeStampedModel):
@@ -72,6 +73,7 @@ class Cliente(AuditModel, SoftDeleteModel):
         indexes = [
             models.Index(fields=['numero_documento']),
             models.Index(fields=['telefono']),
+            models.Index(fields=['email']),  # ✅ Índice para búsquedas
         ]
     
     def __str__(self):
@@ -93,19 +95,9 @@ class Cliente(AuditModel, SoftDeleteModel):
 class Ticket(AuditModel, SoftDeleteModel):
     """Modelo principal de Ticket/Orden de Servicio (SaaS)"""
     
-    ESTADO_CHOICES = [
-        ('RECIBIDO', 'Recibido'),
-        ('EN_PROCESO', 'En Proceso'),
-        ('LISTO', 'Listo para Entrega'),
-        ('ENTREGADO', 'Entregado'),
-        ('CANCELADO', 'Cancelado'),
-    ]
-    
-    PRIORIDAD_CHOICES = [
-        ('NORMAL', 'Normal'),
-        ('URGENTE', 'Urgente'),
-        ('EXPRESS', 'Express'),
-    ]
+    # ✅ Usar constantes importadas
+    ESTADO_CHOICES = TicketEstados.CHOICES
+    PRIORIDAD_CHOICES = TicketPrioridades.CHOICES
 
     TIPO_ENTREGA_CHOICES = [
             ('RECOJO', 'Recojo en Tienda'),
@@ -147,13 +139,13 @@ class Ticket(AuditModel, SoftDeleteModel):
     estado = models.CharField(
         max_length=20,
         choices=ESTADO_CHOICES,
-        default='RECIBIDO',
+        default=TicketEstados.RECIBIDO,  # ✅ Usar constante
         verbose_name="Estado"
     )
     prioridad = models.CharField(
         max_length=20,
         choices=PRIORIDAD_CHOICES,
-        default='NORMAL',
+        default=TicketPrioridades.NORMAL,  # ✅ Usar constante
         verbose_name="Prioridad"
     )
     tipo_entrega = models.CharField(
@@ -200,20 +192,18 @@ class Ticket(AuditModel, SoftDeleteModel):
         # LÓGICA SAAS: Generar número usando configuración de empresa
         if not self.numero_ticket and self.empresa:
             try:
-                # Intentamos obtener config, si no existe usamos default
-                config = self.empresa.config_tickets
-                prefijo = config.prefijo_ticket
+                # Leemos la configuración consolidada directamente de la Empresa
+                prefijo = self.empresa.ticket_prefijo or 'TK-'
             except:
-                prefijo = 'TKT'
+                prefijo = 'TK-'
             
             # Buscamos el último secuencial de ESTA empresa
             ultimo = Ticket.objects.filter(empresa=self.empresa).order_by('-secuencial').first()
             nuevo_sec = (ultimo.secuencial + 1) if ultimo else 1
             self.secuencial = nuevo_sec
             
-            # Formato: PREFIJO-AÑO-SECUENCIAL (Ej: WASH-2024-0001)
-            anio = timezone.now().year
-            self.numero_ticket = f"{prefijo}-{anio}-{str(nuevo_sec).zfill(6)}"
+            # Formato simple: PREFIJO + SECUENCIAL_00000X (Ej: TK-000001)
+            self.numero_ticket = f"{prefijo}{str(nuevo_sec).zfill(6)}"
         
         # Fallback por si acaso falla la lógica anterior o no hay empresa (casos edge)
         if not self.numero_ticket:
@@ -250,7 +240,7 @@ class Ticket(AuditModel, SoftDeleteModel):
     
     def puede_entregar(self):
         """Verifica si el ticket puede ser entregado"""
-        if self.estado != 'LISTO':
+        if self.estado != TicketEstados.LISTO:  # ✅ Usar constante
             return False, "El ticket no está listo para entrega"
         if not self.esta_pagado() and not self.requiere_pago_anticipado:
             return False, "El ticket tiene saldo pendiente de pago"
@@ -262,7 +252,7 @@ class Ticket(AuditModel, SoftDeleteModel):
         if not puede:
             raise ValueError(mensaje)
         
-        self.estado = 'ENTREGADO'
+        self.estado = TicketEstados.ENTREGADO  # ✅ Usar constante
         self.fecha_entrega = timezone.now()
         self.save()
 

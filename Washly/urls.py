@@ -17,7 +17,7 @@ from servicios.views import (
     CategoriaServicioViewSet, ServicioViewSet, TipoPrendaViewSet,
     PrendaViewSet, PromocionViewSet
 )
-from core.views import EmpresaViewSet, SedeViewSet
+from core.views import EmpresaViewSet, SedeViewSet, HistorialSuscripcionViewSet
 from pagos.views import MetodoPagoConfigViewSet
 
 router = DefaultRouter()
@@ -25,6 +25,7 @@ router = DefaultRouter()
 # Core
 router.register(r'core/empresa', EmpresaViewSet, basename='empresa')
 router.register(r'core/sedes', SedeViewSet, basename='sede')
+router.register(r'core/historial-suscripcion', HistorialSuscripcionViewSet, basename='historial-suscripcion')
 
 # Tickets y Clientes
 router.register(r'clientes', ClienteViewSet, basename='cliente')

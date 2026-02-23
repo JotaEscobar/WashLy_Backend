@@ -24,13 +24,17 @@ class IsActiveSubscription(permissions.BasePermission):
         if 'pagos' in path or 'webhook' in path:
             return True
 
-        # 4. Verificar Fecha de Vencimiento
+        # 4. ✅ Validación segura: Verificar que el usuario tiene perfil
+        if not hasattr(request.user, 'perfil'):
+            return False  # Usuario sin perfil configurado
+
+        # 5. Verificar Fecha de Vencimiento
         try:
             empresa = request.user.perfil.empresa
-            if empresa.fecha_vencimiento < timezone.now().date():
+            if empresa.fecha_vencimiento.date() < timezone.now().date():
                 return False # 403 Forbidden
-        except AttributeError:
-            # Usuario sin perfil/empresa configurada correctamente
+        except (AttributeError, TypeError):
+            # Error al acceder a empresa o fecha_vencimiento
             return False
             
         return True

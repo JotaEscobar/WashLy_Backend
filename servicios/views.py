@@ -11,6 +11,9 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db import transaction
 
+from core.permissions import IsActiveSubscription  # ✅ AGREGADO
+from core.mixins import resolver_sede_desde_request
+
 from .models import (
     CategoriaServicio, Servicio, TipoPrenda, Prenda,
     PrecioPorPrenda, Promocion
@@ -23,24 +26,35 @@ from .serializers import (
 
 class BaseTenantViewSet(viewsets.ModelViewSet):
     """
-    Clase base para filtrar automáticamente por empresa y asignar auditoría.
+    Clase base para filtrar automáticamente por empresa/sede y asignar auditoría.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsActiveSubscription]  # ✅ AGREGADO
 
     def get_queryset(self):
         # Filtra siempre por la empresa del usuario logueado
-        # Excluye registros marcados como eliminados (soft delete) si aplica
-        return self.queryset.model.objects.filter(
+        queryset = self.queryset.model.objects.filter(
             empresa=self.request.user.perfil.empresa, 
             activo=True
         )
+        
+        # Filtro por Sede (resuelve header X-Current-Sede-ID a nivel de view/DRF)
+        sede = resolver_sede_desde_request(self.request)
+        if sede and hasattr(self.queryset.model, 'sede'):
+            queryset = queryset.filter(sede=sede)
+        
+        return queryset
 
     def perform_create(self, serializer):
-        # Asigna automáticamente la empresa y el usuario creador
-        serializer.save(
-            empresa=self.request.user.perfil.empresa,
-            creado_por=self.request.user
-        )
+        save_kwargs = {
+            'empresa': self.request.user.perfil.empresa,
+            'creado_por': self.request.user
+        }
+        
+        sede = resolver_sede_desde_request(self.request)
+        if sede and hasattr(self.queryset.model, 'sede'):
+            save_kwargs['sede'] = sede
+        
+        serializer.save(**save_kwargs)
     
     def perform_update(self, serializer):
         # Verifica si el modelo tiene el campo 'actualizado_por' antes de guardarlo
@@ -48,6 +62,7 @@ class BaseTenantViewSet(viewsets.ModelViewSet):
             serializer.save(actualizado_por=self.request.user)
         else:
             serializer.save()
+
 
 
 class CategoriaServicioViewSet(BaseTenantViewSet):

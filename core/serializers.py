@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Empresa, Sede
+from .models import Empresa, Sede, HistorialSuscripcion
 
 class EmpresaSerializer(serializers.ModelSerializer):
     direccion = serializers.CharField(source='direccion_fiscal', required=False, allow_blank=True)
@@ -10,9 +10,9 @@ class EmpresaSerializer(serializers.ModelSerializer):
         model = Empresa
         fields = [
             'id', 'nombre', 'ruc', 'direccion_fiscal', 
-            'logo', 'moneda', 'plan', 'estado', 
+            'logo', 'moneda', 'plan', 'estado', 'fecha_vencimiento',
             'telefono_contacto', 'email_contacto',
-            'ticket_prefijo', 'ticket_dias_entrega', 'ticket_mensaje_pie',
+            'ticket_prefijo', 'ticket_mensaje_pie',
             'stock_minimo_global', 'notif_email_activas',
             'direccion', 'telefono', 'activo'
         ]
@@ -26,3 +26,8 @@ class SedeSerializer(serializers.ModelSerializer):
         model = Sede
         fields = '__all__'
         read_only_fields = ['empresa', 'creado_por', 'actualizado_por']
+
+class HistorialSuscripcionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HistorialSuscripcion
+        fields = '__all__'

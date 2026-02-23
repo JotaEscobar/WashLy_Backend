@@ -170,11 +170,11 @@ class TicketCreateSerializer(serializers.ModelSerializer):
     items = TicketItemSerializer(many=True)
     
     # Campos para el pago inicial (opcional)
-    pago_monto = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, write_only=True)
-    metodo_pago_id = serializers.IntegerField(required=False, write_only=True) # ID de MetodoPagoConfig
+    pago_monto = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True, write_only=True)
+    metodo_pago_id = serializers.IntegerField(required=False, allow_null=True, write_only=True) # ID de MetodoPagoConfig
     
     # Legacy support (si el frontend aún envía string)
-    metodo_pago_str = serializers.CharField(max_length=50, required=False, write_only=True)
+    metodo_pago_str = serializers.CharField(max_length=50, required=False, allow_null=True, allow_blank=True, write_only=True)
 
     class Meta:
         model = Ticket
@@ -198,38 +198,12 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         user = request.user
         empresa = user.perfil.empresa # Obtenemos empresa del usuario
         
-        # Validar Caja si hay pago
-        caja_abierta = None
-        metodo_config = None
-        
-        if pago_monto and float(pago_monto) > 0:
-            caja_abierta = CajaSesion.objects.filter(
-                usuario=user, 
-                empresa=empresa, 
-                estado='ABIERTA'
-            ).first()
-            
-            if not caja_abierta:
-                raise serializers.ValidationError({
-                    "error": "No tienes una caja abierta. Apertura caja para recibir pagos."
-                })
-            
-            # Buscar configuración del método de pago
-            if metodo_pago_id:
-                metodo_config = MetodoPagoConfig.objects.filter(id=metodo_pago_id, empresa=empresa).first()
-            elif metodo_pago_str:
-                # Intento de fallback inteligente: buscar por código
-                metodo_config = MetodoPagoConfig.objects.filter(
-                    codigo_metodo=metodo_pago_str.upper(), 
-                    empresa=empresa
-                ).first()
+        from pagos.services import registrar_pago
 
         # Crear Ticket (Asignando empresa y usuario)
-        ticket = Ticket.objects.create(
-            empresa=empresa,
-            creado_por=user,
-            **validated_data
-        )
+        validated_data['empresa'] = empresa
+        validated_data['creado_por'] = user
+        ticket = Ticket.objects.create(**validated_data)
         
         # Crear Items
         for item_data in items_data:
@@ -242,16 +216,14 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         
         # Registrar Pago Inicial
         if pago_monto and float(pago_monto) > 0:
-            Pago.objects.create(
-                ticket=ticket,
-                caja=caja_abierta,
-                monto=pago_monto,
-                metodo_pago_config=metodo_config,
-                metodo_pago_snapshot=metodo_config.nombre_mostrar if metodo_config else (metodo_pago_str or "EFECTIVO"),
-                estado='PAGADO',
-                referencia=f'Pago inicial Ticket {ticket.numero_ticket}',
+            registrar_pago(
+                user=user,
                 empresa=empresa,
-                creado_por=user
+                ticket=ticket,
+                monto=pago_monto,
+                metodo_pago_id=metodo_pago_id,
+                metodo_pago_str=metodo_pago_str,
+                referencia=f'Pago inicial Ticket {ticket.numero_ticket}'
             )
         
         return ticket

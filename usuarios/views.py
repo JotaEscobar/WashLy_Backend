@@ -8,6 +8,7 @@ from core.permissions import IsActiveSubscription
 class CustomTokenObtainPairView(TokenObtainPairView):
     """Vista de Login que devuelve Token + Rol + Datos de Empresa"""
     serializer_class = CustomTokenObtainPairSerializer
+    permission_classes = [permissions.AllowAny] # Permite acceso sin token previo
 
 class UsuarioViewSet(viewsets.ModelViewSet):
     serializer_class = UsuarioSerializer

@@ -1,6 +1,6 @@
 from django.db import models
 from django.conf import settings
-from core.models import AuditModel, Empresa, TimeStampedModel
+from core.models import AuditModel, Empresa, Sede, TimeStampedModel
 from tickets.models import Ticket
 from core.utils import generar_numero_unico
 
@@ -13,7 +13,6 @@ class MetodoPagoConfig(TimeStampedModel):
         ('TARJETA', 'Tarjeta de Crédito/Débito'),
         ('YAPE', 'Yape'),
         ('PLIN', 'Plin'),
-        ('TRANSFERENCIA', 'Transferencia Bancaria'),
     ]
 
     empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='metodos_pago')
@@ -36,6 +35,7 @@ class MetodoPagoConfig(TimeStampedModel):
 
 class CajaSesion(AuditModel):
     usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    sede = models.ForeignKey(Sede, on_delete=models.PROTECT, null=True, blank=True, related_name='cajas_sesion')
     fecha_apertura = models.DateTimeField(auto_now_add=True)
     fecha_cierre = models.DateTimeField(null=True, blank=True)
     
@@ -50,7 +50,8 @@ class CajaSesion(AuditModel):
     comentarios = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return f"Caja {self.id} - {self.usuario.username}"
+        sede_str = self.sede.nombre if self.sede else 'Sede (Global)'
+        return f"Caja {self.id} - {self.usuario.username} ({sede_str})"
 
 
 class Pago(AuditModel):
@@ -75,11 +76,15 @@ class Pago(AuditModel):
             self.metodo_pago_snapshot = self.metodo_pago_config.nombre_mostrar
             
         if not self.caja and self.creado_por:
-            caja_abierta = CajaSesion.objects.filter(
-                empresa=self.empresa, 
-                usuario=self.creado_por, 
-                estado='ABIERTA'
-            ).first()
+            # Buscar caja abierta que coincida con la sede del ticket
+            caja_filters = {
+                'empresa': self.empresa, 
+                'usuario': self.creado_por, 
+                'estado': 'ABIERTA'
+            }
+            if self.ticket and self.ticket.sede:
+                caja_filters['sede'] = self.ticket.sede
+            caja_abierta = CajaSesion.objects.filter(**caja_filters).first()
             if caja_abierta:
                 self.caja = caja_abierta
         super().save(*args, **kwargs)

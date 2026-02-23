@@ -12,6 +12,7 @@ from decimal import Decimal
 import json
 
 from core.permissions import IsActiveSubscription # <--- NUEVO IMPORT
+from core.mixins import resolver_sede_desde_request
 
 from .models import Pago, CajaSesion, MovimientoCaja, MetodoPagoConfig
 from .serializers import (
@@ -21,7 +22,7 @@ from .serializers import (
 
 class BaseTenantViewSet(viewsets.ModelViewSet):
     """
-    Clase base para asegurar que todo se filtre por la empresa del usuario.
+    Clase base para asegurar que todo se filtre por la empresa/sede del usuario.
     """
     # IsActiveSubscription detectará internamente que estamos en /pagos y PERMITIRÁ el acceso
     # para que puedan pagar su renovación.
@@ -29,21 +30,47 @@ class BaseTenantViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         # Filtra siempre por la empresa del usuario logueado
-        return self.queryset.model.objects.filter(
+        queryset = self.queryset.model.objects.filter(
             empresa=self.request.user.perfil.empresa
         )
+        
+        # Filtro por Sede (resuelve header X-Current-Sede-ID a nivel de view/DRF)
+        sede = resolver_sede_desde_request(self.request)
+        if sede and hasattr(self.queryset.model, 'sede'):
+            queryset = queryset.filter(sede=sede)
+        
+        return queryset
     
     def perform_create(self, serializer):
-        serializer.save(
-            empresa=self.request.user.perfil.empresa,
-            creado_por=self.request.user
-        )
+        save_kwargs = {
+            'empresa': self.request.user.perfil.empresa,
+            'creado_por': self.request.user
+        }
+        
+        sede = resolver_sede_desde_request(self.request)
+        if sede and hasattr(self.queryset.model, 'sede'):
+            save_kwargs['sede'] = sede
+        
+        serializer.save(**save_kwargs)
 
 
 class MetodoPagoConfigViewSet(BaseTenantViewSet):
     """CRUD para configurar métodos de pago (Yape, Plin, Bancos)"""
-    queryset = MetodoPagoConfig.objects.filter(activo=True).order_by('id')
+    queryset = MetodoPagoConfig.objects.all().order_by('id')
     serializer_class = MetodoPagoConfigSerializer
+
+    def get_queryset(self):
+        # Primero aplicamos el filtro multi-tenant base (por empresa)
+        qs = super().get_queryset()
+        
+        # Solo filtrar por activo en listados (no en detail/update/delete)
+        # En el POS solo queremos los activos, pero en Config mostramos todos
+        if self.action == 'list':
+            incluir_inactivos = self.request.query_params.get('todos') == 'true'
+            if not incluir_inactivos:
+                qs = qs.filter(activo=True)
+            
+        return qs
 
     def perform_create(self, serializer):
         serializer.save(
@@ -58,26 +85,39 @@ class PagoViewSet(BaseTenantViewSet):
     search_fields = ['numero_pago', 'ticket__numero_ticket', 'ticket__cliente__nombres', 'ticket__cliente__apellidos']
     ordering = ['-fecha_pago']
 
-    def perform_create(self, serializer):
-        user = self.request.user
+    def create(self, request, *args, **kwargs):
+        from rest_framework.response import Response
+        from rest_framework import serializers
+        from pagos.services import registrar_pago
+        from tickets.models import Ticket
+
+        user = request.user
         empresa = user.perfil.empresa
         
-        caja_abierta = CajaSesion.objects.filter(
-            usuario=user, 
-            empresa=empresa, 
-            estado='ABIERTA'
-        ).first()
+        monto = request.data.get('monto')
+        ticket_id = request.data.get('ticket')
+        metodo_pago_id = request.data.get('metodo_pago_config') # ID if sent
+        metodo_pago_str = request.data.get('metodo_pago') # fallback o legacy
+        referencia = request.data.get('referencia')
         
-        if not caja_abierta:
-            raise serializers.ValidationError(
-                {"error": "No tienes una caja abierta. Apertura caja para registrar pagos."}
-            )
+        ticket = Ticket.objects.filter(id=ticket_id, empresa=empresa).first()
+        if not ticket:
+            return Response({"error": "Ticket no encontrado"}, status=400)
             
-        serializer.save(
-            creado_por=user, 
-            caja=caja_abierta,
-            empresa=empresa
-        )
+        try:
+            pago = registrar_pago(
+                user=user,
+                empresa=empresa,
+                ticket=ticket,
+                monto=monto,
+                metodo_pago_id=metodo_pago_id,
+                metodo_pago_str=metodo_pago_str,
+                referencia=referencia
+            )
+            serializer = self.get_serializer(pago)
+            return Response(serializer.data, status=201)
+        except serializers.ValidationError as e:
+            return Response(e.detail, status=400)
 
     @action(detail=True, methods=['post'])
     def anular(self, request, pk=None):
@@ -104,6 +144,12 @@ class PagoViewSet(BaseTenantViewSet):
 class CajaViewSet(BaseTenantViewSet):
     queryset = CajaSesion.objects.all().order_by('-fecha_apertura')
     serializer_class = CajaSesionSerializer
+
+    def get_serializer_context(self):
+        """Inyecta la sede actual en el contexto del serializer."""
+        context = super().get_serializer_context()
+        context['sede'] = resolver_sede_desde_request(self.request)
+        return context
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -217,21 +263,29 @@ class CajaViewSet(BaseTenantViewSet):
 
     @action(detail=False, methods=['get'])
     def mi_caja(self, request):
-        caja = CajaSesion.objects.filter(
-            usuario=request.user, 
-            empresa=request.user.perfil.empresa, 
-            estado='ABIERTA'
-        ).first()
+        sede = resolver_sede_desde_request(request)
+        filters = {
+            'usuario': request.user,
+            'empresa': request.user.perfil.empresa,
+            'estado': 'ABIERTA'
+        }
+        if sede:
+            filters['sede'] = sede
+        caja = CajaSesion.objects.filter(**filters).first()
         if caja:
-            return Response(self.get_serializer(caja).data)
+            return Response(self.get_serializer(caja, context={'request': request, 'sede': sede}).data)
         return Response(None)
 
     @action(detail=False, methods=['get'])
     def ultimo_cierre(self, request):
-        ultima_caja = CajaSesion.objects.filter(
-            empresa=request.user.perfil.empresa, 
-            estado='CERRADA'
-        ).order_by('-fecha_cierre').first()
+        sede = resolver_sede_desde_request(request)
+        filters = {
+            'empresa': request.user.perfil.empresa,
+            'estado': 'CERRADA'
+        }
+        if sede:
+            filters['sede'] = sede
+        ultima_caja = CajaSesion.objects.filter(**filters).order_by('-fecha_cierre').first()
         
         if not ultima_caja: return Response(None)
         detalle = {}
@@ -242,22 +296,29 @@ class CajaViewSet(BaseTenantViewSet):
     @action(detail=False, methods=['post'])
     def abrir(self, request):
         empresa = request.user.perfil.empresa
+        sede = resolver_sede_desde_request(request)
         
-        if CajaSesion.objects.filter(usuario=request.user, empresa=empresa, estado='ABIERTA').exists():
-            return Response({'error': 'Ya tienes una caja abierta'}, status=400)
+        # Verificar si ya tiene caja abierta en ESTA sede
+        filters_check = {'usuario': request.user, 'empresa': empresa, 'estado': 'ABIERTA'}
+        if sede:
+            filters_check['sede'] = sede
+        
+        if CajaSesion.objects.filter(**filters_check).exists():
+            return Response({'error': 'Ya tienes una caja abierta en esta sede'}, status=400)
         
         detalle = request.data.get('detalle_apertura', {})
         monto_inicial = Decimal(str(request.data.get('monto_inicial', 0)))
         
         caja = CajaSesion.objects.create(
             usuario=request.user,
-            empresa=empresa, 
+            empresa=empresa,
+            sede=sede,
             monto_inicial=monto_inicial,
             detalle_apertura=json.dumps(detalle) if isinstance(detalle, dict) else str(detalle),
             estado='ABIERTA',
             creado_por=request.user
         )
-        serializer = self.get_serializer(caja, context={'request': request})
+        serializer = self.get_serializer(caja, context={'request': request, 'sede': sede})
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
@@ -315,6 +376,7 @@ class CajaViewSet(BaseTenantViewSet):
         fecha_desde_str = request.query_params.get('fecha_desde')
         fecha_hasta_str = request.query_params.get('fecha_hasta')
         empresa_actual = request.user.perfil.empresa
+        sede = resolver_sede_desde_request(request)
         
         now_local = timezone.localtime(timezone.now())
         dt_start = datetime.strptime(fecha_desde_str, '%Y-%m-%d').date() if fecha_desde_str else now_local.date()
@@ -337,6 +399,9 @@ class CajaViewSet(BaseTenantViewSet):
             fecha_pago__gte=start_aware,
             fecha_pago__lte=end_aware
         ).select_related('ticket', 'creado_por', 'ticket__cliente', 'metodo_pago_config')
+        
+        if sede:
+            pagos = pagos.filter(ticket__sede=sede)
         
         for p in pagos:
             desc = f"Pago Ticket #{p.ticket.numero_ticket}"
@@ -368,6 +433,9 @@ class CajaViewSet(BaseTenantViewSet):
             creado_en__lte=end_aware
         ).select_related('creado_por', 'metodo_pago_config')
         
+        if sede:
+            movimientos = movimientos.filter(caja__sede=sede)
+        
         for m in movimientos:
             tipo_texto = "Gasto" if m.tipo == 'EGRESO' else "Ingreso"
             desc = f"{tipo_texto} - {m.categoria}: {m.descripcion}"
@@ -396,6 +464,9 @@ class CajaViewSet(BaseTenantViewSet):
             fecha_apertura__gte=start_aware,
             fecha_apertura__lte=end_aware
         ).select_related('usuario')
+        
+        if sede:
+            aperturas = aperturas.filter(sede=sede)
 
         for c in aperturas:
             apertura_detalle = safe_json(c.detalle_apertura)
@@ -423,6 +494,9 @@ class CajaViewSet(BaseTenantViewSet):
             fecha_cierre__lte=end_aware,
             estado='CERRADA'
         ).select_related('usuario')
+        
+        if sede:
+            cierres = cierres.filter(sede=sede)
 
         for c in cierres:
             cierre_detalle = safe_json(c.detalle_cierre)

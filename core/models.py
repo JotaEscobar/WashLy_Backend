@@ -13,9 +13,8 @@ class Empresa(models.Model):
     Modelo Tenant (Empresa/Cliente SaaS)
     """
     PLANES = [
-        ('FREE', 'Plan Gratuito / Prueba'),
-        ('PRO', 'Plan Profesional'),
-        ('ENTERPRISE', 'Plan Empresarial'),
+        ('DEMO', 'Prueba de 7 días'),
+        ('MENSUAL', 'Suscripción Mensual'),
     ]
 
     ESTADOS = [
@@ -37,14 +36,13 @@ class Empresa(models.Model):
     moneda = models.CharField(max_length=3, default='PEN', verbose_name="Moneda (ISO)")
 
     # Campos SaaS
-    plan = models.CharField(max_length=20, choices=PLANES, default='FREE')
+    plan = models.CharField(max_length=20, choices=PLANES, default='DEMO')
     fecha_inicio = models.DateTimeField(auto_now_add=True)
     fecha_vencimiento = models.DateTimeField(verbose_name="Fecha de Vencimiento")
     estado = models.CharField(max_length=20, choices=ESTADOS, default='ACTIVO')
 
     # --- NUEVO: Configuración de Tickets ---
     ticket_prefijo = models.CharField(max_length=10, default='TK-', verbose_name="Prefijo del Ticket")
-    ticket_dias_entrega = models.PositiveIntegerField(default=2, verbose_name="Días defecto para entrega")
     ticket_mensaje_pie = models.TextField(blank=True, verbose_name="Mensaje al pie del ticket")
 
     # Configuración Global de Inventario y Notificaciones
@@ -172,3 +170,38 @@ class Sede(AuditModel, SoftDeleteModel):
     
     def __str__(self):
         return f"{self.nombre} ({self.codigo})"
+
+
+class HistorialSuscripcion(models.Model):
+    """
+    Registro histórico de pagos de suscripción (OFF-PLATFORM).
+    Se crea manualmente por el SuperAdmin tras verificar el pago.
+    """
+    METODOS = [
+        ('YAPE', 'Yape'),
+        ('PLIN', 'Plin'),
+        ('TRANSFERENCIA', 'Transferencia Bancaria'),
+        ('EFECTIVO', 'Efectivo / Otro'),
+    ]
+
+    empresa = models.ForeignKey(Empresa, on_delete=models.CASCADE, related_name='historial_suscripciones')
+    fecha_pago = models.DateTimeField(verbose_name="Fecha de Pago")
+    monto = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Monto Pagado")
+    metodo = models.CharField(max_length=20, choices=METODOS, default='TRANSFERENCIA')
+    comprobante_codigo = models.CharField(max_length=50, blank=True, verbose_name="Código de Operación")
+    
+    periodo_inicio = models.DateField(verbose_name="Inicio Periodo")
+    periodo_fin = models.DateField(verbose_name="Fin Periodo")
+    
+    observaciones = models.TextField(blank=True)
+    
+    registrado_por = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Historial Suscripción"
+        verbose_name_plural = "Historial Suscripciones"
+        ordering = ['-fecha_pago']
+
+    def __str__(self):
+        return f"{self.empresa.nombre} - {self.fecha_pago.date()} - {self.monto}"

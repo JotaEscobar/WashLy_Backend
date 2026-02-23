@@ -69,7 +69,11 @@ class Prenda(AuditModel, SoftDeleteModel):
         verbose_name = "Prenda"
         verbose_name_plural = "Prendas"
         ordering = ['tipo', 'nombre']
-        unique_together = ['empresa', 'nombre', 'tipo']
+        # ✅ Constraint único: no duplicar nombre por empresa
+        unique_together = ['empresa', 'nombre']  # Más estricto
+        indexes = [
+            models.Index(fields=['tipo', 'nombre']),  # Para búsquedas
+        ]
     
     def __str__(self):
         return f"{self.tipo.nombre} - {self.nombre}"
