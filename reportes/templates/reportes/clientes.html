@@ -1,0 +1,46 @@
+{% extends "reportes/base_reporte.html" %}
+
+{% block title %}Clientes{% endblock %}
+{% block report_title %}Directorio de Clientes{% endblock %}
+
+{% block content %}
+<div class="metrics-container" style="width: 100%;">
+    <div class="metric-card accent">
+        <div class="metric-label">Total Registrados</div>
+        <div class="metric-value">{{ total_clientes|default:"0" }} <span
+                style="font-size: 10pt; color: #64748b;">personas</span></div>
+    </div>
+    <div class="metric-card" style="width: 66.66%;">
+        <div class="metric-label">Uso de Base de Datos</div>
+        <div style="font-size: 10pt; color: #475569; margin-top: 5px;">
+            Este reporte muestra una lista de los clientes guardados en la base de datos de la empresa,
+            independientemente de la fecha.
+        </div>
+    </div>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th style="width: 40%;">NOMBRE COMPLETO</th>
+            <th style="width: 30%;">TELÉFONO / WHATSAPP</th>
+            <th style="width: 30%;">DNI / DOCUMENTO</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in registros %}
+        <tr>
+            <td class="text-strong">{{ c.nombre_completo }}</td>
+            <td class="font-mono text-dim">{{ c.telefono|default:"-" }}</td>
+            <td class="font-mono">{{ c.numero_documento|default:"-" }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="3" class="center text-dim" style="padding: 2rem;">
+                Aún no hay clientes registrados en la base de datos.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

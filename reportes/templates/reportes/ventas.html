@@ -1,0 +1,45 @@
+{% extends "reportes/base_reporte.html" %}
+
+{% block title %}Ventas{% endblock %}
+{% block report_title %}Reporte de Ventas por Servicio{% endblock %}
+
+{% block content %}
+<div class="metrics-container" style="width: 100%;">
+    <div class="metric-card accent">
+        <div class="metric-label">Ingreso Bruto Total</div>
+        <div class="metric-value">S/ {{ total_ventas|floatformat:2 }}</div>
+    </div>
+    <div class="metric-card" style="width: 66.66%;">
+        <div class="metric-label">Resumen Analítico</div>
+        <div style="font-size: 10pt; color: #475569; margin-top: 5px;">
+            Este reporte agrupa el volumen de ventas por tipo de servicio/producto en el periodo seleccionado. Útil para
+            identificar cuáles son los servicios estrella del negocio.
+        </div>
+    </div>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th style="width: 50%;">SERVICIO / PRODUCTO</th>
+            <th style="width: 25%;" class="center">CANTIDAD TOTAL</th>
+            <th style="width: 25%;" class="right">SUBTOTAL ACUMULADO</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for v in registros %}
+        <tr>
+            <td class="text-strong">{{ v.servicio__nombre }}</td>
+            <td class="center font-mono" style="font-size: 10pt;">{{ v.cantidad_total }}</td>
+            <td class="right font-mono text-strong">S/ {{ v.subtotal|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="3" class="center text-dim" style="padding: 2rem;">
+                No hay ventas registradas en el periodo seleccionado.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

@@ -44,6 +44,9 @@ class Empresa(models.Model):
     # --- NUEVO: Configuración de Tickets ---
     ticket_prefijo = models.CharField(max_length=10, default='TK-', verbose_name="Prefijo del Ticket")
     ticket_mensaje_pie = models.TextField(blank=True, verbose_name="Mensaje al pie del ticket")
+    ticket_servicios_descripcion = models.CharField(max_length=255, blank=True, verbose_name="Descripción Inline de Servicios")
+    ticket_disclaimer = models.TextField(blank=True, verbose_name="Disclaimer del Ticket")
+    ticket_logo = models.ImageField(upload_to='logos_tickets/', null=True, blank=True, verbose_name="Logo del Ticket")
 
     # Configuración Global de Inventario y Notificaciones
     stock_minimo_global = models.PositiveIntegerField(default=10, verbose_name="Alerta Stock Mínimo Global")

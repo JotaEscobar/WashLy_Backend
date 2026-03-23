@@ -1,0 +1,72 @@
+{% extends "reportes/base_reporte.html" %}
+
+{% block title %}Diario Electrónico{% endblock %}
+{% block report_title %}Diario Electrónico de Caja{% endblock %}
+
+{% block content %}
+<div class="metrics-container" style="width: 100%;">
+    <div class="metric-card accent" style="width: 33.33%;">
+        <div class="metric-label">Total Ingresos</div>
+        <div class="metric-value" style="color: #10B981;">S/ {{ total_ingresos|floatformat:2 }}</div>
+    </div>
+    <div class="metric-card accent" style="width: 33.33%;">
+        <div class="metric-label">Total Egresos</div>
+        <div class="metric-value" style="color: #EF4444;">S/ {{ total_egresos|floatformat:2 }}</div>
+    </div>
+    <div class="metric-card accent" style="width: 33.33%;">
+        <div class="metric-label">Saldo Neto</div>
+        <div class="metric-value" style="color: {% if saldo_neto < 0 %}#EF4444{% else %}#3B82F6{% endif %};">S/ {{ saldo_neto|floatformat:2 }}</div>
+    </div>
+</div>
+
+<table class="data-table" style="margin-top: 2rem;">
+    <thead>
+        <tr>
+            <th style="width: 15%;">HORA</th>
+            <th style="width: 10%;" class="center">TIPO</th>
+            <th style="width: 25%;">CONCEPTO</th>
+            <th style="width: 20%;">CLIENTE</th>
+            <th style="width: 10%;">USUARIO</th>
+            <th style="width: 10%;" class="center">MÉTODO</th>
+            <th style="width: 10%;" class="right">MONTO</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in transacciones %}
+        <tr>
+            <td>{{ t.fecha|date:"d/m H:i" }}</td>
+            <td class="center">
+                {% if t.tipo == 'INGRESO' %}
+                <span class="badge green">INGRESO</span>
+                {% else %}
+                <span class="badge red">EGRESO</span>
+                {% endif %}
+            </td>
+            <td>{{ t.concepto }}</td>
+            <td class="text-strong">{{ t.cliente }}</td>
+            <td class="text-dim">{{ t.usuario }}</td>
+            <td class="center">
+                {% if 'Yape' in t.metodo or 'YAPE' in t.metodo or 'Plin' in t.metodo or 'PLIN' in t.metodo %}
+                <span class="badge purple">{{ t.metodo|upper }}</span>
+                {% elif 'Efectivo' in t.metodo or 'EFECTIVO' in t.metodo %}
+                <span class="badge gray">{{ t.metodo|upper }}</span>
+                {% elif 'Tarjeta' in t.metodo or 'TARJETA' in t.metodo %}
+                <span class="badge blue">{{ t.metodo|upper }}</span>
+                {% else %}
+                <span class="badge gray">{{ t.metodo|upper }}</span>
+                {% endif %}
+            </td>
+            <td class="right font-mono text-strong" style="color: {% if t.tipo == 'INGRESO' %}#10B981{% else %}#EF4444{% endif %};">
+                {% if t.tipo == 'INGRESO' %}+{% else %}-{% endif %} S/ {{ t.monto|floatformat:2 }}
+            </td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="7" class="center text-dim" style="padding: 2rem;">
+                No hay movimientos en este periodo.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

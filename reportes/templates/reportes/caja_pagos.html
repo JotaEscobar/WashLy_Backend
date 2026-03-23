@@ -1,0 +1,74 @@
+{% extends "reportes/base_reporte.html" %}
+
+{% block title %}Caja y Pagos{% endblock %}
+{% block report_title %}Reporte Caja y Pagos{% endblock %}
+
+{% block content %}
+<div class="metrics-container" style="width: 100%;">
+    <div class="metric-card accent">
+        <div class="metric-label">Ingresos Confirmados</div>
+        <div class="metric-value">S/ {{ total_ingresos|floatformat:2 }}</div>
+    </div>
+    <div class="metric-card" style="width: 66.66%;">
+        <div class="metric-label">Resumen Rápido</div>
+        <div style="font-size: 10pt; color: #475569; margin-top: 5px;">
+            Este reporte muestra los movimientos financieros exactos registrados en la caja (independientemente de
+            cuándo se generó el ticket).
+            {% if estado_filtro == 'PAGADO' %}
+            Filtro activo: <strong>Solo montos cancelados e ingresados.</strong>
+            {% elif estado_filtro == 'PENDIENTE' %}
+            Filtro activo: <strong>Deudas o compromisos por cobrar.</strong>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<table class="data-table">
+    <thead>
+        <tr>
+            <th style="width: 15%;">FECHA</th>
+            <th style="width: 15%;">REFERENCIA</th>
+            <th style="width: 30%;">CLIENTE</th>
+            <th style="width: 15%;" class="center">MÉTODO</th>
+            <th style="width: 10%;" class="center">ESTADO</th>
+            <th style="width: 15%;" class="right">MONTO</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in registros %}
+        <tr>
+            <td>{{ p.fecha|date:"d M H:i" }}</td>
+            <td class="font-mono">TKT-{{ p.id }}</td>
+            <td class="text-strong">{{ p.cliente }}</td>
+            <td class="center">
+                {% if 'Yape' in p.metodo or 'YAPE' in p.metodo %}
+                <span class="badge purple">YAPE</span>
+                {% elif 'Efectivo' in p.metodo or 'EFECTIVO' in p.metodo %}
+                <span class="badge gray">EFECTIVO</span>
+                {% elif 'Tarjeta' in p.metodo or 'TARJETA' in p.metodo %}
+                <span class="badge blue">TARJETA</span>
+                {% elif 'Plin' in p.metodo or 'PLIN' in p.metodo %}
+                <span class="badge green">PLIN</span>
+                {% else %}
+                <span class="badge gray">{{ p.metodo|default:"N/A"|upper }}</span>
+                {% endif %}
+            </td>
+            <td class="center">
+                {% if p.estado == 'PAGADO' %}
+                <span class="badge green">PAGADO</span>
+                {% else %}
+                <span class="badge amber">{{ p.estado }}</span>
+                {% endif %}
+            </td>
+            <td class="right font-mono text-strong">S/ {{ p.monto|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+            <td colspan="6" class="center text-dim" style="padding: 2rem;">
+                No hay movimientos registrados para este periodo o filtro.
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

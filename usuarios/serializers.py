@@ -106,6 +106,15 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             data['empresa'] = {
                 'id': perfil.empresa.id,
                 'nombre': perfil.empresa.nombre,
+                'ruc': perfil.empresa.ruc,
+                'direccion_fiscal': getattr(perfil.empresa, 'direccion_fiscal', ''),
+                'telefono_contacto': getattr(perfil.empresa, 'telefono_contacto', ''),
+                'ticket_prefijo': getattr(perfil.empresa, 'ticket_prefijo', 'TK-'),
+                'ticket_mensaje_pie': getattr(perfil.empresa, 'ticket_mensaje_pie', ''),
+                'ticket_disclaimer': getattr(perfil.empresa, 'ticket_disclaimer', ''),
+                'ticket_servicios_descripcion': getattr(perfil.empresa, 'ticket_servicios_descripcion', ''),
+                'ticket_logo': perfil.empresa.ticket_logo.url if perfil.empresa.ticket_logo else None,
+                'logo': perfil.empresa.logo.url if hasattr(perfil.empresa, 'logo') and getattr(perfil.empresa, 'logo', None) else None,
                 'fecha_vencimiento': perfil.empresa.fecha_vencimiento
             }
             if perfil.sede:

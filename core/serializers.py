@@ -13,6 +13,7 @@ class EmpresaSerializer(serializers.ModelSerializer):
             'logo', 'moneda', 'plan', 'estado', 'fecha_vencimiento',
             'telefono_contacto', 'email_contacto',
             'ticket_prefijo', 'ticket_mensaje_pie',
+            'ticket_servicios_descripcion', 'ticket_disclaimer', 'ticket_logo',
             'stock_minimo_global', 'notif_email_activas',
             'direccion', 'telefono', 'activo'
         ]

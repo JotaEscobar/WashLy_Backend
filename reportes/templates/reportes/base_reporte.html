@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+{% load static %}
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Reporte {% block title %}{% endblock %}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;700;800&display=swap');
+
+        @page {
+            size: A4 {
+                % block page_orientation %
+            }
+
+            portrait {
+                % endblock %
+            }
+
+            ;
+            margin: 2cm 1.5cm 2.5cm 1.5cm;
+
+            @bottom-center {
+                content: "Página " counter(page) " de " counter(pages);
+                font-family: 'Inter', sans-serif;
+                font-size: 8pt;
+                color: #94a3b8;
+            }
+
+            @bottom-right {
+                content: "Generado el {{ ahora|date:'d/m/Y H:i' }} por {{ emisor }}";
+                font-family: 'Inter', sans-serif;
+                font-size: 8pt;
+                color: #94a3b8;
+            }
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            color: #334155;
+            /* Slate 700 */
+            font-size: 10pt;
+            line-height: 1.5;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Tipografía Premium */
+        h1,
+        h2,
+        h3,
+        h4 {
+            font-family: 'Outfit', sans-serif;
+            margin: 0;
+            color: #0f172a;
+            /* Slate 900 */
+        }
+
+        /* Encabezado Principal */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #e2e8f0;
+            /* Slate 200 */
+            padding-bottom: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .header-left .logo-text {
+            font-size: 24pt;
+            font-weight: 800;
+            color: #1e40af;
+            /* Blue 800 */
+            margin-bottom: 0.25rem;
+        }
+
+        .header-left .empresa-name {
+            font-size: 11pt;
+            font-weight: 600;
+            color: #475569;
+        }
+
+        .header-right {
+            text-align: right;
+        }
+
+        .report-title {
+            font-size: 18pt;
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: -0.5px;
+        }
+
+        .report-meta {
+            font-size: 9pt;
+            color: #64748b;
+        }
+
+        .report-meta strong {
+            color: #334155;
+        }
+
+        /* Top Cards (Métricas) */
+        .metrics-container {
+            display: table;
+            width: 100%;
+            margin-bottom: 2.5rem;
+            border-spacing: 15px 0;
+            /* Espacio horizontal similar a gap */
+        }
+
+        .metric-card {
+            display: table-cell;
+            width: 33.33%;
+            background-color: #f8fafc;
+            /* Slate 50 */
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            /* Redondeo más compatible */
+            padding: 1.25rem;
+            box-sizing: border-box;
+            /* Previene desbordes */
+        }
+
+        .metric-card.accent {
+            background-color: #eff6ff;
+            /* Blue 50 */
+            border-color: #bfdbfe;
+            /* Blue 200 */
+        }
+
+        .metric-card.accent .metric-value {
+            color: #1d4ed8;
+            /* Blue 700 */
+        }
+
+        .metric-label {
+            font-size: 8pt;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric-value {
+            font-family: 'Outfit', sans-serif;
+            font-size: 20pt;
+            font-weight: 700;
+            color: #0f172a;
+            margin: 0;
+            line-height: 1;
+        }
+
+        /* Tablas de Datos Ejecutivas */
+        table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+            font-size: 9pt;
+        }
+
+        table.data-table th {
+            font-family: 'Inter', sans-serif;
+            font-size: 8pt;
+            font-weight: 700;
+            color: #475569;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 2px solid #cbd5e1;
+            /* Slate 300 */
+        }
+
+        table.data-table th.right {
+            text-align: right;
+        }
+
+        table.data-table th.center {
+            text-align: center;
+        }
+
+        table.data-table td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #e2e8f0;
+            color: #334155;
+            vertical-align: middle;
+        }
+
+        table.data-table td.right {
+            text-align: right;
+        }
+
+        table.data-table td.center {
+            text-align: center;
+        }
+
+        /* Zebra Striping sutil */
+        table.data-table tbody tr:nth-child(even) {
+            background-color: #f8fafc;
+            /* Slate 50 */
+        }
+
+        /* Font Mono para números / montos / IDs */
+        .font-mono {
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: 600;
+            font-size: 8.5pt;
+        }
+
+        /* Badges (Estados) */
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            font-size: 7.5pt;
+            font-weight: 700;
+            border-radius: 9999px;
+            /* Pill */
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            text-align: center;
+        }
+
+        .badge.green {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+
+        /* Green 100/800 */
+        .badge.amber {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+
+        /* Amber 100/800 */
+        .badge.red {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        /* Red 100/800 */
+        .badge.blue {
+            background-color: #dbeafe;
+            color: #1e40af;
+        }
+
+        /* Blue 100/800 */
+        .badge.gray {
+            background-color: #f1f5f9;
+            color: #475569;
+        }
+
+        /* Slate 100/700 */
+        .badge.purple {
+            background-color: #f3e8ff;
+            color: #6b21a8;
+        }
+
+        /* Purple 100/800 */
+
+        /* Utilitarios */
+        .text-strong {
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .text-dim {
+            color: #64748b;
+        }
+
+        /* Clearfix hack para tablas o floats si hiciera falta */
+        .clearfix::after {
+            content: "";
+            clear: both;
+            display: table;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="header clearfix">
+        <div class="header-left" style="float: left; width: 60%;">
+            <!-- Logo incrustado -->
+            <img src="{{ logo_b64|default:'' }}" alt="WashLy"
+                style="height: 65px; margin-right: 5px; float: left; object-fit: contain;">
+            <div style="float: left; padding-top: 5px;">
+                <div class="logo-text" style="font-size: 20pt; margin-bottom: 2px;">WASHLY</div>
+                <div class="empresa-name">{{ empresa.nombre }} {% if sede %} - {{ sede.nombre }}{% endif %}</div>
+            </div>
+        </div>
+        <div class="header-right" style="float: right;">
+            <div class="report-title">{% block report_title %}REPORTE{% endblock %}</div>
+            <div class="report-meta">
+                {% if fecha_inicio and fecha_fin %}
+                <div>Del <strong>{{ fecha_inicio|date:'d/m/Y' }}</strong> al <strong>{{ fecha_fin|date:'d/m/Y'
+                        }}</strong></div>
+                {% else %}
+                <div>Al <strong>{{ ahora|date:'d/m/Y' }}</strong></div>
+                {% endif %}
+
+                {% if estado_filtro and estado_filtro != 'TODOS' %}
+                <div style="margin-top: 5px;">Estado: <strong>{{ estado_filtro }}</strong></div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% block content %}
+    {% endblock %}
+
+</body>
+
+</html>

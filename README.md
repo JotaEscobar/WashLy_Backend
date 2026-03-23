@@ -1,309 +1,191 @@
-# Washly - Sistema ERP para Lavandería
+# Washly — Sistema ERP para Lavanderías
 
-Sistema ERP modular completo para gestión de lavanderías desarrollado en Django y Django REST Framework.
+Sistema ERP SaaS modular para gestión de lavanderías. Backend en Django REST Framework, frontend en React + Vite.
 
 ## 🚀 Características
 
-### Módulos Implementados
+### Módulos
 
-1. **Gestión de Tickets/Órdenes de Servicio**
-   - Creación de tickets con número único y código QR
-   - Estados: Recibido, En Proceso, Listo, Entregado
-   - Notificaciones automáticas por WhatsApp/Email
-   - Historial completo de cambios de estado
+| Módulo | Descripción |
+|--------|-------------|
+| **Tickets** | Órdenes de servicio con QR, estados, prioridades y tracking |
+| **Servicios** | Catálogo con precios por prenda, promociones y combos |
+| **Inventario** | Control de insumos, alertas de stock, movimientos auditados |
+| **Pagos** | Efectivo, Yape, Plin, Tarjeta. Caja con apertura/cierre |
+| **Notificaciones** | Email/WhatsApp/SMS automáticos vía Celery |
+| **Reportes** | Dashboard KPIs, analítica, reportes PDF |
+| **Multi-sede** | Sucursales con contexto via header, roles por sede |
+| **SaaS** | Multi-tenant, suscripciones, panel de proveedor |
 
-2. **Gestión de Servicios**
-   - Catálogo de servicios (lavado, planchado, etc.)
-   - Precios configurables por prenda y servicio
-   - Sistema de promociones y combos
-   - Cálculo automático de precios
+## 📋 Stack Tecnológico
 
-3. **Inventario**
-   - Control de insumos y productos
-   - Alertas de stock bajo/crítico
-   - Registro de entradas y salidas
-   - Movimientos de inventario con auditoría
-
-4. **Pagos**
-   - Múltiples métodos de pago (Efectivo, Tarjeta, Yape, Plin)
-   - Estados de pago vinculados a tickets
-   - Validación de entrega con pago
-   - Reportes de ingresos
-
-5. **Notificaciones**
-   - Sistema de notificaciones automáticas
-   - Canales: Email, WhatsApp, SMS
-   - Tareas asíncronas con Celery
-   - Historial de notificaciones
-
-6. **Reportes y Dashboard**
-   - Dashboard con métricas principales
-   - Reportes de ventas por período
-   - Estadísticas de tickets
-   - Exportación de datos
-
-7. **Multi-sede (Preparado)**
-   - Sistema preparado para múltiples sucursales
-   - Roles de usuario configurables
-   - Gestión centralizada
-
-## 📋 Requisitos Previos
-
-- Python 3.10+
-- pip
-- Redis (para Celery)
-- SQLite (incluido) o PostgreSQL (opcional)
+| Componente | Tecnología |
+|-----------|------------|
+| Backend | Django 5.2 + DRF |
+| Frontend | React 19 + Vite 7 + TailwindCSS |
+| Estado (Front) | Zustand |
+| Auth | JWT (SimpleJWT) |
+| Tareas Async | Celery + Redis |
+| DB (Dev) | SQLite |
+| DB (Prod) | PostgreSQL |
 
 ## 🔧 Instalación
 
-### 1. Clonar el proyecto
+### Backend
 
 ```bash
 cd Washly
-```
-
-### 2. Crear entorno virtual
-
-```bash
 python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# Linux/Mac
-source venv/bin/activate
-```
-
-### 3. Instalar dependencias
-
-```bash
+venv\Scripts\activate        # Windows
+# source venv/bin/activate   # Linux/Mac
 pip install -r requirements.txt
-```
-
-### 4. Configurar variables de entorno
-
-```bash
-cp .env.example .env
-# Editar .env con tus configuraciones
-```
-
-### 5. Aplicar migraciones
-
-```bash
-python manage.py makemigrations
+cp .env.example .env         # Editar con tus valores
 python manage.py migrate
-```
-
-### 6. Crear superusuario
-
-```bash
 python manage.py createsuperuser
-```
-
-### 7. Cargar datos iniciales (opcional)
-
-```bash
-python manage.py loaddata initial_data.json
-```
-
-### 8. Ejecutar servidor
-
-```bash
 python manage.py runserver
 ```
 
-## 🔄 Ejecutar Celery (para tareas asíncronas)
-
-### Terminal 1 - Celery Worker
+### Frontend
 
 ```bash
-celery -A Washly worker -l info
+cd washly-frontend
+npm install
+cp .env.example .env
+npm run dev
 ```
 
-### Terminal 2 - Celery Beat (tareas programadas)
+### Docker (Opcional)
 
 ```bash
+docker compose up -d
+```
+
+## 🔄 Celery (Tareas Asíncronas)
+
+```bash
+# Terminal 1 — Worker
+celery -A Washly worker -l info
+
+# Terminal 2 — Beat (programadas)
 celery -A Washly beat -l info
 ```
 
 ## 📚 API Endpoints
 
-### Autenticación
+### Autenticación (JWT)
 
 ```
-POST /api/auth/login/
-Body: {"username": "user", "password": "pass"}
-Response: {"token": "xxx"}
+POST /api/token/           → Obtener tokens (login)
+POST /api/token/refresh/   → Renovar access token
+POST /api/token/verify/    → Verificar token
 ```
 
-### Clientes
+### Core
 
 ```
-GET    /api/clientes/                 # Listar clientes
-POST   /api/clientes/                 # Crear cliente
-GET    /api/clientes/{id}/            # Detalle de cliente
-PUT    /api/clientes/{id}/            # Actualizar cliente
-DELETE /api/clientes/{id}/            # Eliminar cliente
-GET    /api/clientes/{id}/tickets/    # Tickets del cliente
+GET/PATCH /core/empresa/           → Mi empresa
+GET/POST  /core/sedes/             → Sedes
+GET       /core/historial-suscripcion/  → Historial pagos SaaS
 ```
 
-### Tickets
+### Tickets y Clientes
 
 ```
-GET    /api/tickets/                  # Listar tickets
-POST   /api/tickets/                  # Crear ticket
-GET    /api/tickets/{id}/             # Detalle de ticket
-PUT    /api/tickets/{id}/             # Actualizar ticket
-POST   /api/tickets/{id}/update_estado/  # Cambiar estado
-POST   /api/tickets/{id}/agregar_item/   # Agregar item
-POST   /api/tickets/{id}/cancelar/       # Cancelar ticket
-GET    /api/tickets/dashboard/            # Estadísticas
+CRUD /clientes/                    → Gestión de clientes
+CRUD /tickets/                     → Gestión de tickets
+POST /tickets/{id}/update_estado/  → Cambiar estado
+POST /tickets/{id}/cancelar/       → Cancelar
+CRUD /ticket-items/                → Items de ticket
 ```
 
 ### Servicios
 
 ```
-GET    /api/servicios/                # Listar servicios
-POST   /api/servicios/                # Crear servicio
-GET    /api/categorias-servicio/      # Categorías
-GET    /api/prendas/                  # Prendas
-GET    /api/promociones/              # Promociones
-POST   /api/promociones/calcular_precio/  # Calcular precio con promoción
+CRUD /categorias-servicio/         → Categorías
+CRUD /servicios/                   → Servicios
+CRUD /tipos-prenda/                → Tipos de prenda
+CRUD /prendas/                     → Prendas
+CRUD /promociones/                 → Promociones
 ```
 
 ### Inventario
 
 ```
-GET    /api/inventario/productos/     # Listar productos
-POST   /api/inventario/movimientos/   # Registrar movimiento
-GET    /api/inventario/alertas/       # Alertas de stock
+CRUD /inventario/productos/        → Productos
+CRUD /inventario/movimientos/      → Movimientos
+GET  /inventario/alertas/          → Alertas de stock
 ```
 
 ### Pagos
 
 ```
-GET    /api/pagos/                    # Listar pagos
-POST   /api/pagos/                    # Registrar pago
-POST   /api/pagos/{id}/confirmar/     # Confirmar pago
+CRUD /pagos/config/                → Métodos de pago
+POST /pagos/registrar/             → Registrar pago
+POST /pagos/caja/abrir/            → Abrir caja
+POST /pagos/caja/cerrar/           → Cerrar caja
 ```
 
 ### Reportes
 
 ```
-GET    /api/reportes/dashboard/       # Dashboard principal
-GET    /api/reportes/ventas/?fecha_desde=2024-01-01&fecha_hasta=2024-01-31
+GET /reportes/dashboard/kpis/      → KPIs principales
+GET /reportes/dashboard/operativo/ → Pipeline operativo
+GET /reportes/dashboard/analitica/ → Tendencias y análisis
+GET /reportes/ventas/              → Reporte de ventas
+GET /reportes/diario-electronico/  → Libro diario (PDF)
 ```
 
-## 🏗️ Arquitectura del Proyecto
+## 🏗️ Arquitectura
 
 ```
-Washly/
-├── Washly/                 # Configuración principal
-│   ├── settings.py        # Configuración Django
-│   ├── urls.py            # URLs principales
-│   ├── celery.py          # Configuración Celery
-│   └── wsgi.py
-├── core/                   # App base con modelos abstractos
-│   ├── models.py          # Modelos base (TimeStamped, Audit, SoftDelete)
-│   └── utils.py           # Utilidades comunes
-├── tickets/               # Gestión de tickets
-│   ├── models.py          # Cliente, Ticket, TicketItem
-│   ├── serializers.py
-│   ├── views.py
-│   ├── signals.py         # Signals para notificaciones
-│   └── admin.py
-├── servicios/             # Catálogo de servicios
-│   ├── models.py          # Servicio, Prenda, Promocion
-│   ├── serializers.py
-│   └── views.py
-├── inventario/            # Control de inventario
-│   ├── models.py          # Producto, MovimientoInventario
-│   └── views.py
-├── pagos/                 # Gestión de pagos
-│   ├── models.py          # Pago
-│   └── views.py
-├── notificaciones/        # Sistema de notificaciones
-│   ├── models.py          # Notificacion
-│   ├── tasks.py           # Tareas Celery
-│   └── views.py
-└── reportes/              # Reportes y dashboard
-    └── views.py
+Washly/                    ← Backend Django
+├── Washly/                ← Config (settings, urls, celery)
+├── core/                  ← Modelos abstractos, permisos, middleware
+├── usuarios/              ← Auth, perfiles, roles
+├── tickets/               ← Clientes, tickets, items
+├── servicios/             ← Catálogo, precios, promos
+├── inventario/            ← Stock, movimientos, alertas
+├── pagos/                 ← Pagos, caja, métodos
+├── reportes/              ← Dashboard, reportes PDF
+└── notificaciones/        ← Celery tasks, email/WhatsApp
+
+washly-frontend/           ← Frontend React
+├── src/
+│   ├── api/               ← Axios config, auth, token refresh
+│   ├── components/        ← Componentes reutilizables
+│   ├── context/           ← AuthContext
+│   ├── layouts/           ← MainLayout, ProviderLayout
+│   ├── pages/             ← Páginas principales
+│   ├── stores/            ← Zustand stores
+│   └── utils/             ← Utilidades
 ```
 
-## 🛠️ Buenas Prácticas Implementadas
+## 🛡️ Seguridad Implementada
 
-1. **Modelos Abstractos**: `TimeStampedModel`, `AuditModel`, `SoftDeleteModel`
-2. **Signals**: Para disparar notificaciones automáticas
-3. **Serializers**: Separados para list, create, update
-4. **ViewSets**: Con filtros, búsqueda y ordenamiento
-5. **Permisos**: Sistema de autenticación con tokens
-6. **Validaciones**: En modelos y serializers
-7. **Tareas Asíncronas**: Con Celery para notificaciones
-8. **Auditoría**: Registro de quién crea/modifica
-9. **Soft Delete**: Eliminación lógica de registros
-10. **Código Limpio**: Siguiendo PEP 8
-
-## 🔐 Seguridad
-
-- Autenticación por tokens
-- CORS configurado
-- Validación de datos en serializers
-- Protección contra SQL injection (ORM)
-- Variables sensibles en .env
-
-## 📱 Frontend (Sugerido)
-
-Este backend puede conectarse con:
-- React/Next.js
-- Vue.js
-- Angular
-- Flutter (móvil)
-- React Native (móvil)
+- **JWT** con access token de 30 min y refresh de 7 días
+- **Rotación y blacklist** de refresh tokens
+- **Rate limiting** (30 req/min anónimos, 120 req/min autenticados)
+- **CORS** controlado por variables de entorno
+- **Permisos por rol** (Admin, Cajero, Operario)
+- **Kill-switch de suscripción** a nivel global
+- **Middleware de sede** con validación de acceso
+- **Seguridad de producción** (HSTS, cookies seguras, XSS protection)
+- **Logging estructurado** para auditoría
 
 ## 🚀 Despliegue en Producción
 
-### Configuraciones recomendadas:
-
-1. **Base de datos**: PostgreSQL
+1. **Base de datos**: Migrar a PostgreSQL
 2. **Server**: Gunicorn + Nginx
-3. **Cache**: Redis
-4. **Files**: S3 o similar
+3. **Archivos estáticos**: WhiteNoise
+4. **HTTPS**: Obligatorio (configurado en settings)
 5. **Monitoring**: Sentry
 6. **CI/CD**: GitHub Actions
-
-## 📝 Próximas Funcionalidades
-
-- [ ] Sistema de reportes avanzados (PDF/Excel)
-- [ ] Integración con pasarelas de pago
-- [ ] App móvil para operarios
-- [ ] Portal web para clientes
-- [ ] Integración con WhatsApp Business API
-- [ ] Sistema de fidelización
-- [ ] Análisis predictivo de demanda
-- [ ] Multi-moneda
-
-## 🤝 Contribuciones
-
-Las contribuciones son bienvenidas. Por favor:
-
-1. Fork el proyecto
-2. Crea una rama para tu feature
-3. Commit tus cambios
-4. Push a la rama
-5. Abre un Pull Request
+7. **Contenedores**: Docker Compose
 
 ## 📄 Licencia
 
 Este proyecto está bajo licencia MIT.
 
-## 👥 Autor
-
-Sistema desarrollado para lavanderías en Perú.
-
-## 📞 Soporte
-
-Para soporte y consultas, contactar a: info@washly.pe
-
 ---
 
-**Washly** - Modernizando las lavanderías del Perú 🧺✨
+**Washly** — Modernizando las lavanderías del Perú 🧺✨
