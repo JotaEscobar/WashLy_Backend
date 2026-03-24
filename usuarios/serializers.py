@@ -124,7 +124,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 }
         except Exception:
             # Fallback para superusuarios sin perfil de lavandería
-            data['rol'] = 'ADMIN_GLOBAL' if user.is_superuser else 'STAFF'
+            data['rol'] = 'ADMIN' if user.is_superuser else 'STAFF'
             data['empresa'] = None
 
         return data

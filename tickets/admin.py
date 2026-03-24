@@ -72,7 +72,7 @@ class TicketAdmin(admin.ModelAdmin):
             'fields': ('numero_ticket', 'qr_code')
         }),
         ('Cliente y Sede', {
-            'fields': ('cliente', 'sede', 'empleado_asignado')
+            'fields': ('cliente', 'sede')
         }),
         ('Estado', {
             'fields': ('estado', 'prioridad')
@@ -80,8 +80,8 @@ class TicketAdmin(admin.ModelAdmin):
         ('Fechas', {
             'fields': ('fecha_recepcion', 'fecha_prometida', 'fecha_entrega')
         }),
-        ('Detalles', {
-            'fields': ('observaciones', 'instrucciones_especiales', 'requiere_pago_anticipado')
+        ('Dealles', {
+            'fields': ('observaciones',)
         }),
         ('Control', {
             'fields': ('activo', 'eliminado_en')

@@ -1,0 +1,62 @@
+Creating test database for alias 'default'...
+
+C:\Users\ASUS\Desktop\Proyectos\Whasly fullstack\Washly\venv\Lib\site-packages\rest_framework\pagination.py:207: UnorderedObjectListWarning: Pagination may yield inconsistent results with an unordered object_list: <class 'core.models.Empresa'> QuerySet.
+  paginator = self.django_paginator_class(queryset, page_size)
+INFO 2026-03-22 21:40:42,638 permissions: Suscripci¾n vencida para empresa 2: LavanderÝa Vencida
+.......INFO 2026-03-22 21:41:04,044 permissions: Suscripci¾n vencida para empresa 2: LavanderÝa Vencida
+....F.FC:\Users\ASUS\Desktop\Proyectos\Whasly fullstack\Washly\venv\Lib\site-packages\rest_framework\pagination.py:207: UnorderedObjectListWarning: Pagination may yield inconsistent results with an unordered object_list: <class 'pagos.models.MetodoPagoConfig'> QuerySet.
+  paginator = self.django_paginator_class(queryset, page_size)
+.....INFO 2026-03-22 21:41:28,841 permissions: Suscripci¾n vencida para empresa 2: LavanderÝa Vencida
+....INFO 2026-03-22 21:41:35,268 permissions: Suscripci¾n vencida para empresa 2: LavanderÝa Vencida
+..F.C:\Users\ASUS\Desktop\Proyectos\Whasly fullstack\Washly\venv\Lib\site-packages\rest_framework\pagination.py:207: UnorderedObjectListWarning: Pagination may yield inconsistent results with an unordered object_list: <class 'django.contrib.auth.models.User'> QuerySet.
+  paginator = self.django_paginator_class(queryset, page_size)
+.INFO 2026-03-22 21:41:47,596 permissions: Suscripci¾n vencida para empresa 2: LavanderÝa Vencida
+..
+======================================================================
+FAIL: test_aislamiento_notificaciones (notificaciones.tests.NotificacionesAPITestCase.test_aislamiento_notificaciones)
+Verificar que el admin solo ve las notificaciones de su empresa
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ASUS\Desktop\Proyectos\Whasly fullstack\Washly\notificaciones\tests.py", line 45, in test_aislamiento_notificaciones
+    self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 200 != 403
+
+======================================================================
+FAIL: test_abrir_caja (pagos.tests.PagosAPITestCase.test_abrir_caja)
+Asegurar que un cajero puede abrir caja y se asocia a su sede
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ASUS\Desktop\Proyectos\Whasly fullstack\Washly\pagos\tests.py", line 35, in test_abrir_caja
+    self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 200 != 201
+
+======================================================================
+FAIL: test_crear_ticket (tickets.tests.TicketsAPITestCase.test_crear_ticket)
+Probar creaci¾n de ticket asigna n·mero ·nico automßticamente
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ASUS\Desktop\Proyectos\Whasly fullstack\Washly\tickets\tests.py", line 79, in test_crear_ticket
+    self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 400 != 201
+
+----------------------------------------------------------------------
+Ran 30 tests in 72.441s
+
+FAILED (failures=3)
+Destroying test database for alias 'default'...
+
+Found 30 test(s).
+
+-----
+
+WeasyPrint could not import some external libraries. Please carefully follow the installation steps before reporting an issue:
+https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#installation
+https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#troubleshooting 
+
+-----
+
+System check identified no issues (0 silenced).
+ERROR DE VALIDACION: {'cliente': [ErrorDetail(string='Este campo es requerido.', code='required')], 'items': [ErrorDetail(string='Este campo es requerido.', code='required')]}

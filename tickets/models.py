@@ -11,24 +11,7 @@ from django.utils import timezone
 from .constants import TicketEstados, TicketPrioridades  # ✅ Importar constantes
 
 
-class ConfiguracionTicket(TimeStampedModel):
-    """
-    Configuración de tickets específica por Empresa
-    """
-    empresa = models.OneToOneField(Empresa, on_delete=models.CASCADE, related_name='config_tickets')
-    
-    prefijo_ticket = models.CharField(max_length=5, default='TKT', verbose_name="Prefijo (Ej: TKT)")
-    plazo_entrega_default = models.PositiveIntegerField(default=48, verbose_name="Plazo entrega default (horas)")
-    
-    terminos_condiciones = models.TextField(default="No nos hacemos responsables por prendas que destiñen...", verbose_name="Términos y Condiciones")
-    pie_pagina_ticket = models.TextField(default="¡Gracias por su preferencia!", verbose_name="Pie de página del ticket")
-    
-    # Formato visual
-    mostrar_precios_ticket = models.BooleanField(default=True)
-    incluir_logo_ticket = models.BooleanField(default=True)
 
-    def __str__(self):
-        return f"Config Tickets - {self.empresa.nombre}"
 
 
 class Cliente(AuditModel, SoftDeleteModel):
@@ -160,18 +143,6 @@ class Ticket(AuditModel, SoftDeleteModel):
     fecha_entrega = models.DateTimeField(null=True, blank=True, verbose_name="Fecha Real de Entrega")
     
     observaciones = models.TextField(blank=True, verbose_name="Observaciones")
-    instrucciones_especiales = models.TextField(blank=True, verbose_name="Instrucciones Especiales")
-    
-    requiere_pago_anticipado = models.BooleanField(default=False, verbose_name="Requiere Pago Anticipado")
-    
-    empleado_asignado = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='tickets_asignados',
-        verbose_name="Empleado Asignado"
-    )
     
     class Meta:
         verbose_name = "Ticket"

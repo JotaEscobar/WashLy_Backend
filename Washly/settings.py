@@ -37,7 +37,8 @@ INSTALLED_APPS = [
     'pagos',
     'reportes',
     'notificaciones',
-]
+] # Reloading for templates
+
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',

@@ -12,13 +12,12 @@ from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 from usuarios.views import CustomTokenObtainPairView, UsuarioViewSet
 
 # ViewSets
-from tickets.views import ClienteViewSet, TicketViewSet, TicketItemViewSet
+from tickets.views import ClienteViewSet, TicketViewSet
 from servicios.views import (
     CategoriaServicioViewSet, ServicioViewSet, TipoPrendaViewSet,
     PrendaViewSet, PromocionViewSet
 )
 from core.views import EmpresaViewSet, SedeViewSet, HistorialSuscripcionViewSet
-from pagos.views import MetodoPagoConfigViewSet
 
 router = DefaultRouter()
 
@@ -30,7 +29,6 @@ router.register(r'core/historial-suscripcion', HistorialSuscripcionViewSet, base
 # Tickets y Clientes
 router.register(r'clientes', ClienteViewSet, basename='cliente')
 router.register(r'tickets', TicketViewSet, basename='ticket')
-router.register(r'ticket-items', TicketItemViewSet, basename='ticketitem')
 
 # Servicios
 router.register(r'categorias-servicio', CategoriaServicioViewSet, basename='categoria-servicio')
@@ -39,9 +37,9 @@ router.register(r'tipos-prenda', TipoPrendaViewSet, basename='tipo-prenda')
 router.register(r'prendas', PrendaViewSet, basename='prenda')
 router.register(r'promociones', PromocionViewSet, basename='promocion')
 
-# Usuarios y Pagos
+# Usuarios
 router.register(r'usuarios', UsuarioViewSet, basename='usuario')
-router.register(r'pagos/config', MetodoPagoConfigViewSet, basename='metodopago')
+# Nota: MetodoPagoConfigViewSet está registrado en pagos/urls.py (bajo pagos/config/)
 
 urlpatterns = [
     path('admin/', admin.site.urls),

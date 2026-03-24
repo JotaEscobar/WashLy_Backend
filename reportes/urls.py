@@ -18,8 +18,10 @@ urlpatterns = [
     path('dashboard/analitica/', DashboardAnaliticaView.as_view(), name='dashboard-analitica'),
     path('exportar/pdf/', ReportePDFView.as_view(), name='reporte-pdf'),
 
-    # Endpoints de Super Admin (SaaS)
-    path('saas/stats/', SuperAdminStatsView.as_view(), name='saas-stats'),
-    path('saas/empresas/', GlobalEmpresasView.as_view(), name='saas-empresas'),
-    path('saas/empresas/<int:pk>/acciones/', AccionesEmpresaView.as_view(), name='saas-acciones'),
+
+    # Endpoints de Super Admin (SaaS Provider Panel)
+    path('provider/stats/', SuperAdminStatsView.as_view(), name='provider-stats'),
+    path('provider/empresas/', GlobalEmpresasView.as_view(), name='provider-empresas'),
+    path('provider/empresas/<int:pk>/accion/', AccionesEmpresaView.as_view(), name='provider-accion-empresa'),
+
 ]

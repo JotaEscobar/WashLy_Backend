@@ -51,8 +51,20 @@ class Empresa(models.Model):
     # Configuración Global de Inventario y Notificaciones
     stock_minimo_global = models.PositiveIntegerField(default=10, verbose_name="Alerta Stock Mínimo Global")
     
+    # Notificaciones Email Config (SMTP Personalizado por Empresa)
+    notif_email_activas = models.BooleanField(default=False, verbose_name="Activar Notificaciones Email")
+    email_host = models.CharField(max_length=100, default='smtp.gmail.com', verbose_name="Host SMTP")
+    email_port = models.PositiveIntegerField(default=587, verbose_name="Puerto SMTP", blank=True, null=True)
+    email_use_tls = models.BooleanField(default=True, verbose_name="Usar TLS")
+    email_host_user = models.EmailField(blank=True, null=True, verbose_name="Email SMTP User")
+    email_host_password = models.CharField(max_length=128, blank=True, null=True, verbose_name="Contraseña de Aplicación SMTP")
+    
+    # NUEVO: Toggles por evento
+    notif_event_creacion = models.BooleanField(default=True, verbose_name="Email al Crear Ticket")
+    notif_event_listo = models.BooleanField(default=True, verbose_name="Email al Estar Listo")
+    notif_event_entregado = models.BooleanField(default=False, verbose_name="Email al Entregar")
+    
     # Toggles de Notificaciones (Globales por empresa)
-    notif_email_activas = models.BooleanField(default=True, verbose_name="Activar Email")
     notif_whatsapp_activas = models.BooleanField(default=False, verbose_name="Activar WhatsApp")
     notif_sms_activas = models.BooleanField(default=False, verbose_name="Activar SMS")
 

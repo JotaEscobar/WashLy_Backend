@@ -30,13 +30,14 @@ class EmpresaAdmin(admin.ModelAdmin):
             'fields': ('plan', 'estado', 'fecha_vencimiento', 'fecha_inicio')
         }),
         ('Configuración Tickets', {
-            'fields': ('ticket_prefijo', 'ticket_mensaje_pie')
+            'fields': ('ticket_prefijo', 'ticket_logo', 'ticket_mensaje_pie', 'ticket_servicios_descripcion', 'ticket_disclaimer')
         }),
         ('Configuración Global', {
             'fields': ('stock_minimo_global', 'notif_email_activas', 'notif_whatsapp_activas', 'notif_sms_activas')
         }),
     )
 
+    @admin.display(description="Fecha Vencimiento")
     def color_vencimiento(self, obj):
         if not obj.fecha_vencimiento:
             return "-"
@@ -53,8 +54,8 @@ class EmpresaAdmin(admin.ModelAdmin):
             color,
             obj.fecha_vencimiento.strftime('%d/%m/%Y')
         )
-    color_vencimiento.short_description = "Fecha Vencimiento"
 
+    @admin.action(description="Renovar 1 Mes (Auto)")
     def renovar_un_mes_accion(self, request, queryset):
         for empresa in queryset:
             # Calcular nuevas fechas
@@ -73,7 +74,6 @@ class EmpresaAdmin(admin.ModelAdmin):
                 registrado_por=request.user
             )
         self.message_user(request, f"Se han renovado {queryset.count()} empresas por 30 días.")
-    renovar_un_mes_accion.short_description = "Renovar 1 Mes (Auto)"
 
 @admin.register(Sede)
 class SedeAdmin(admin.ModelAdmin):

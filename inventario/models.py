@@ -75,28 +75,8 @@ class MovimientoInventario(AuditModel):
     class Meta:
         ordering = ['-creado_en']
         
-    def save(self, *args, **kwargs):
-        if not self.pk:
-            self.stock_anterior = self.producto.stock_actual
-            
-            if self.tipo == 'COMPRA':
-                self.producto.stock_actual += self.cantidad
-                # Actualizamos el precio de referencia del producto
-                if self.costo_unitario:
-                    self.producto.precio_compra = self.costo_unitario
-                    
-            elif self.tipo == 'CONSUMO':
-                if self.producto.stock_actual < self.cantidad:
-                    raise ValidationError(f"Stock insuficiente. Tienes {self.producto.stock_actual} y quieres consumir {self.cantidad}")
-                self.producto.stock_actual -= self.cantidad
-                
-            elif self.tipo == 'AJUSTE':
-                self.producto.stock_actual = self.cantidad
-            
-            self.stock_nuevo = self.producto.stock_actual
-            self.producto.save()
-            
-        super().save(*args, **kwargs)
+    def __str__(self):
+        return f"{self.producto.nombre} - {self.tipo} ({self.cantidad})"
 
 class AlertaStock(models.Model):
     producto = models.ForeignKey(Producto, on_delete=models.CASCADE)

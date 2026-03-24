@@ -87,9 +87,10 @@ class UserService:
         if rol is not None:
             perfil.rol = rol
         
-        # Permitir actualizar sede a None
-        if sede is not None or 'sede' in locals():
+        # Solo actualizar sede si se envió explícitamente (sede is not None)
+        if sede is not None:
             perfil.sede = sede
+
         
         perfil.save()
         return perfil

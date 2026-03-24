@@ -13,6 +13,7 @@ from django.db import transaction
 
 from core.permissions import IsActiveSubscription  # ✅ AGREGADO
 from core.mixins import resolver_sede_desde_request
+from .services import ServicioService, PromocionService
 
 from .models import (
     CategoriaServicio, Servicio, TipoPrenda, Prenda,
@@ -24,46 +25,7 @@ from .serializers import (
     PromocionSerializer, CalcularPrecioSerializer
 )
 
-class BaseTenantViewSet(viewsets.ModelViewSet):
-    """
-    Clase base para filtrar automáticamente por empresa/sede y asignar auditoría.
-    """
-    permission_classes = [IsAuthenticated, IsActiveSubscription]  # ✅ AGREGADO
-
-    def get_queryset(self):
-        # Filtra siempre por la empresa del usuario logueado
-        queryset = self.queryset.model.objects.filter(
-            empresa=self.request.user.perfil.empresa, 
-            activo=True
-        )
-        
-        # Filtro por Sede (resuelve header X-Current-Sede-ID a nivel de view/DRF)
-        sede = resolver_sede_desde_request(self.request)
-        if sede and hasattr(self.queryset.model, 'sede'):
-            queryset = queryset.filter(sede=sede)
-        
-        return queryset
-
-    def perform_create(self, serializer):
-        save_kwargs = {
-            'empresa': self.request.user.perfil.empresa,
-            'creado_por': self.request.user
-        }
-        
-        sede = resolver_sede_desde_request(self.request)
-        if sede and hasattr(self.queryset.model, 'sede'):
-            save_kwargs['sede'] = sede
-        
-        serializer.save(**save_kwargs)
-    
-    def perform_update(self, serializer):
-        # Verifica si el modelo tiene el campo 'actualizado_por' antes de guardarlo
-        if hasattr(serializer.instance, 'actualizado_por'):
-            serializer.save(actualizado_por=self.request.user)
-        else:
-            serializer.save()
-
-
+from core.views import BaseTenantViewSet
 
 class CategoriaServicioViewSet(BaseTenantViewSet):
     queryset = CategoriaServicio.objects.all()
@@ -75,7 +37,7 @@ class CategoriaServicioViewSet(BaseTenantViewSet):
 
 
 class ServicioViewSet(BaseTenantViewSet):
-    queryset = Servicio.objects.all().select_related('categoria')
+    queryset = Servicio.objects.all()
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['nombre', 'codigo', 'descripcion']
     ordering_fields = ['nombre', 'precio_base']
@@ -87,7 +49,7 @@ class ServicioViewSet(BaseTenantViewSet):
         return ServicioSerializer
     
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().select_related('categoria')
         
         # Filtrar por categoría
         categoria_id = self.request.query_params.get('categoria', None)
@@ -103,91 +65,16 @@ class ServicioViewSet(BaseTenantViewSet):
     
     @action(detail=True, methods=['post'])
     def establecer_precio_prenda(self, request, pk=None):
-        """
-        Establece el precio para una prenda específica.
-        Soporta creación de prenda al vuelo si se envía 'nombre_prenda'.
-        """
-        servicio = self.get_object() # Ya filtra por tenant
+        """Usa ServicioService para la lógica de upsert y creación al vuelo"""
+        servicio = self.get_object() 
         empresa = request.user.perfil.empresa
         user = request.user
         
-        # 1. Validaciones
-        if servicio.tipo_cobro != 'POR_PRENDA':
-            return Response(
-                {'error': 'Este servicio no cobra por prenda, edite el precio base.'}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        prenda_id = request.data.get('prenda') or request.data.get('prenda_id')
-        nombre_prenda = request.data.get('nombre_prenda') # Nuevo campo para creación al vuelo
-        precio = request.data.get('precio')
-
-        if not precio:
-            return Response({'error': 'El precio es obligatorio'}, status=400)
-
-        # 2. Lógica de Obtención/Creación de Prenda
-        prenda = None
-
-        try:
-            with transaction.atomic():
-                if prenda_id:
-                    # Caso A: Prenda existente seleccionada
-                    prenda = get_object_or_404(Prenda, id=prenda_id, empresa=empresa)
-                
-                elif nombre_prenda:
-                    # Caso B: Crear prenda nueva al vuelo
-                    # Normalizamos el nombre para evitar duplicados por mayúsculas/minúsculas
-                    nombre_clean = nombre_prenda.strip()
-                    
-                    # Buscamos si ya existe por nombre (case insensitive)
-                    prenda = Prenda.objects.filter(
-                        empresa=empresa, 
-                        nombre__iexact=nombre_clean
-                    ).first()
-
-                    if not prenda:
-                        # Si no existe, la creamos. 
-                        # Necesitamos un TipoPrenda por defecto o enviado desde el front.
-                        tipo_id = request.data.get('tipo_prenda_id')
-                        tipo = None
-                        
-                        if tipo_id:
-                            tipo = get_object_or_404(TipoPrenda, id=tipo_id, empresa=empresa)
-                        else:
-                            # Fallback: Buscar o crear un tipo "General" o "Varios"
-                            tipo, _ = TipoPrenda.objects.get_or_create(
-                                nombre="General", 
-                                empresa=empresa, 
-                                defaults={'creado_por': user, 'descripcion': 'Categoría automática'}
-                            )
-                        
-                        prenda = Prenda.objects.create(
-                            nombre=nombre_clean, # Guardamos el nombre limpio
-                            tipo=tipo,
-                            empresa=empresa,
-                            creado_por=user,
-                            activo=True
-                        )
-
-                else:
-                    return Response({'error': 'Debe seleccionar una prenda o ingresar un nombre nuevo'}, status=400)
-
-                # 3. Guardar el Precio (Upsert)
-                precio_obj, created = PrecioPorPrenda.objects.update_or_create(
-                    servicio=servicio,
-                    prenda=prenda,
-                    defaults={
-                        'precio': precio,
-                        'empresa': empresa, # Aseguramos tenant
-                        'creado_por': user
-                    }
-                )
-
-                # Si ya existía y tenía soft-delete (si aplicara), lo reactivamos (opcional según tu modelo)
-                # En este caso PrecioPorPrenda es físico, así que update_or_create basta.
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Delegamos al servicio
+        precio_obj, mensaje = ServicioService.establecer_precio_prenda(servicio, empresa, user, request.data)
+        
+        if not precio_obj:
+            return Response({'error': mensaje}, status=status.HTTP_400_BAD_REQUEST if "precio" in mensaje else 500)
         
         serializer = PrecioPorPrendaSerializer(precio_obj)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -219,14 +106,14 @@ class TipoPrendaViewSet(BaseTenantViewSet):
 
 
 class PrendaViewSet(BaseTenantViewSet):
-    queryset = Prenda.objects.all().select_related('tipo')
+    queryset = Prenda.objects.all()
     serializer_class = PrendaSerializer
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['nombre']
     ordering = ['tipo', 'nombre']
     
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().select_related('tipo')
         tipo_id = self.request.query_params.get('tipo', None)
         if tipo_id:
             queryset = queryset.filter(tipo_id=tipo_id)
@@ -269,56 +156,11 @@ class PromocionViewSet(BaseTenantViewSet):
     
     @action(detail=False, methods=['post'])
     def calcular_precio(self, request):
-        """Calcula el precio con promoción aplicada (SaaS Safe)"""
+        """Calcula el precio con promoción aplicada usando PromocionService (DRY)"""
         serializer = CalcularPrecioSerializer(data=request.data)
-        empresa_actual = request.user.perfil.empresa
-        
         if serializer.is_valid():
-            servicio_id = serializer.validated_data['servicio_id']
-            # SAAS SECURITY: Usar get_object_or_404 con filtro de empresa
-            servicio = get_object_or_404(Servicio, id=servicio_id, empresa=empresa_actual)
-            
-            cantidad = serializer.validated_data['cantidad']
-            prenda_id = serializer.validated_data.get('prenda_id')
-            
-            # 1. Determinar Precio Unitario Base
-            precio_unitario = servicio.precio_base
-            
-            if servicio.tipo_cobro == 'POR_PRENDA' and prenda_id:
-                # Buscar precio específico seguro
-                precio_especifico = servicio.precios_prendas.filter(
-                    prenda_id=prenda_id
-                ).first()
-                if precio_especifico:
-                    precio_unitario = precio_especifico.precio
-            
-            # 2. Calcular Subtotal
-            subtotal = precio_unitario * cantidad
-            descuento = 0
-            
-            # 3. Aplicar Promoción
-            codigo_promocion = serializer.validated_data.get('promocion_codigo')
-            if codigo_promocion:
-                try:
-                    # SAAS SECURITY: Solo buscar promociones de MI empresa
-                    promocion = Promocion.objects.get(
-                        codigo=codigo_promocion, 
-                        empresa=empresa_actual,
-                        activa=True
-                    )
-                    if promocion.es_valida():
-                        descuento = promocion.calcular_descuento(subtotal)
-                except Promocion.DoesNotExist:
-                    pass # Código inválido o de otra empresa, lo ignoramos
-            
-            total = subtotal - descuento
-            
-            return Response({
-                'precio_unitario': float(precio_unitario),
-                'cantidad': float(cantidad),
-                'subtotal': float(subtotal),
-                'descuento': float(descuento),
-                'total': float(total)
-            })
+            empresa = request.user.perfil.empresa
+            resumen = PromocionService.calcular_cotizacion(empresa, serializer.validated_data)
+            return Response(resumen)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

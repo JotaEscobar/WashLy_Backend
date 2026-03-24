@@ -116,9 +116,9 @@ class TicketSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'numero_ticket', 'qr_code', 'qr_code_url', 'cliente', 'cliente_info',
             'sede', 'estado', 'prioridad', 'fecha_recepcion', 'fecha_prometida',
-            'fecha_entrega', 'observaciones', 'instrucciones_especiales',
+            'fecha_entrega', 'observaciones',
             'tipo_entrega',
-            'requiere_pago_anticipado', 'empleado_asignado', 'items',
+            'items',
             'historial_estados', 'total', 'saldo_pendiente', 'esta_pagado',
             'creado_en', 'actualizado_en', 'activo'
         ]
@@ -182,8 +182,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
             'id', 'numero_ticket', 'qr_code', 'creado_en',
             'cliente', 'sede', 'prioridad', 'fecha_prometida', 
             'tipo_entrega', 
-            'observaciones', 'instrucciones_especiales',
-            'requiere_pago_anticipado', 'empleado_asignado', 'items',
+            'observaciones', 'items',
             'pago_monto', 'metodo_pago_id', 'metodo_pago_str'
         ]
         read_only_fields = ['id', 'numero_ticket', 'qr_code', 'creado_en', 'empresa', 'creado_por']

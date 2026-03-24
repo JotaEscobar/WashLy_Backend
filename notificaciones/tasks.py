@@ -48,15 +48,31 @@ def enviar_notificacion_ticket(ticket_id, mensaje, canales=None):
 @shared_task
 def enviar_email(ticket_id, destinatario, asunto, mensaje):
     """
-    Envía notificación por email
+    Envía notificación por email usando el nuevo EmailService si es posible
     """
     from tickets.models import Ticket
-    from .models import Notificacion
+    from .services import EmailService
     
     try:
         ticket = Ticket.objects.get(id=ticket_id) if ticket_id else None
         
-        # Crear registro de notificación
+        if ticket:
+            # Intentar inferir el tipo desde el asunto si no viene explícito
+            tipo = 'CREACION'
+            if 'listo' in asunto.lower():
+                tipo = 'LISTO'
+            elif 'entrega' in asunto.lower() or 'entregado' in asunto.lower():
+                tipo = 'ENTREGADO'
+            
+            # Usar el servicio centralizado (HTML + Branding)
+            exito, result = EmailService.send_ticket_notification(ticket, tipo=tipo)
+            if exito:
+                return True
+            else:
+                logger.warning(f"EmailService falló: {result}. Procediendo con fallback.")
+
+        # Fallback: registrar y enviar email básico
+        from .models import Notificacion
         notif = Notificacion.objects.create(
             ticket=ticket,
             cliente=ticket.cliente if ticket else None,
@@ -67,7 +83,6 @@ def enviar_email(ticket_id, destinatario, asunto, mensaje):
             estado='PENDIENTE'
         )
         
-        # Enviar email
         send_mail(
             subject=asunto,
             message=mensaje,
@@ -76,11 +91,9 @@ def enviar_email(ticket_id, destinatario, asunto, mensaje):
             fail_silently=False,
         )
         
-        # Actualizar estado
         notif.estado = 'ENVIADO'
         notif.fecha_envio = timezone.now()
         notif.save()
-        
         return True
     
     except Exception as e:
@@ -134,32 +147,41 @@ def enviar_whatsapp(ticket_id, destinatario, mensaje):
         return False
 
 
+
 @shared_task
 def verificar_alertas_stock():
     """
-    Verifica productos con stock bajo y envía alertas
+    Verifica productos con stock bajo y crea alertas usando los campos
+    reales del modelo AlertaStock (producto, fecha, mensaje).
     """
     from inventario.models import Producto, AlertaStock
-    
+    from django.utils import timezone
+    from datetime import timedelta
+
     productos_bajo_stock = Producto.objects.filter(
         activo=True,
         stock_actual__lte=models.F('stock_minimo')
     )
-    
+
+    ayer = timezone.now() - timedelta(hours=24)
+
     for producto in productos_bajo_stock:
-        # Verificar si ya hay una alerta activa
-        alerta_activa = AlertaStock.objects.filter(
+        # Evitar duplicar alertas del mismo producto en las últimas 24h
+        alerta_reciente = AlertaStock.objects.filter(
             producto=producto,
-            resuelta=False
+            fecha__gte=ayer
         ).exists()
-        
-        if not alerta_activa:
-            nivel = 'CRITICO' if producto.stock_critico else 'BAJO'
+
+        if not alerta_reciente:
+            nivel = 'CRÍTICO' if producto.stock_actual <= 0 else 'BAJO'
+            mensaje = (
+                f"Stock {nivel}: {producto.nombre} tiene "
+                f"{producto.stock_actual} {producto.unidad_medida} "
+                f"(mínimo: {producto.stock_minimo})"
+            )
             AlertaStock.objects.create(
                 producto=producto,
-                nivel=nivel,
-                stock_actual=producto.stock_actual
+                mensaje=mensaje
             )
-            
-            # Enviar notificación a administradores
-            logger.warning(f"[ALERTA] Stock {nivel} de {producto.nombre}: {producto.stock_actual} {producto.unidad_medida}")
+            logger.warning(f"[ALERTA STOCK] {mensaje}")
+
