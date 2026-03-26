@@ -4,13 +4,30 @@ from datetime import datetime, time, timedelta
 import json
 from .models import Pago, CajaSesion, MovimientoCaja, MetodoPagoConfig
 
+from django.db import transaction
+
 def registrar_pago(user, empresa, ticket, monto, metodo_pago_id=None, metodo_pago_str=None, referencia=None):
     """
     Servicio centralizado para registrar pagos, asegurando que se validen contra la caja
     abierta del usuario y se asigne el método de pago correcto.
+    Usa bloqueos pesimistas para asegurar IDEMPOTENCIA contra múltiples clics.
     """
-    if float(monto) <= 0:
+    monto_float = float(monto)
+    if monto_float <= 0:
         return None
+
+    # Envolver la operación en una transacción atómica para evitar "Race Conditions"
+    with transaction.atomic():
+        # 1. Bloqueo Pesimista: Obtenemos el ticket y bloqueamos la fila hasta terminar
+        from tickets.models import Ticket
+        locked_ticket = Ticket.objects.select_for_update().get(id=ticket.id)
+        
+        # 2. Idempotencia: Verificar que el ticket no se "sobre-pague" por clics dobles
+        saldo_actual = locked_ticket.calcular_saldo_pendiente()
+        if round(monto_float, 2) > round(float(saldo_actual), 2):
+            raise serializers.ValidationError({
+                "error": f"IDEMPOTENCIA ALERT: Intento de pago por S/{monto_float} supera el saldo pendiente de S/{saldo_actual}. Transacción rechazada para evitar sobre-cobro."
+            })
 
     # Validar Caja Abierta
     caja_abierta = CajaSesion.objects.filter(

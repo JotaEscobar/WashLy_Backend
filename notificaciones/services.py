@@ -1,6 +1,7 @@
 from django.core.mail import get_connection, EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
+from django.conf import settings
 from datetime import datetime
 from .models import Notificacion
 
@@ -32,13 +33,38 @@ class EmailService:
         moneda_map = {'PEN': 'S/', 'USD': '$', 'EUR': '€'}
         moneda = moneda_map.get(empresa.moneda, empresa.moneda)
 
+        def fmt(valor):
+            """Formatea un número con coma para miles y punto para decimales, máx. 2 dec."""
+            try:
+                return f"{float(valor):,.2f}"
+            except (TypeError, ValueError):
+                return "0.00"
+
+        # Enriquecer items con subtotales ya formateados
+        items_enriquecidos = []
+        for item in items:
+            subtotal = item.cantidad * item.precio_unitario
+            items_enriquecidos.append({
+                'servicio': item.servicio,
+                'prenda': item.prenda,
+                'cantidad': item.cantidad,
+                'precio_unitario': fmt(item.precio_unitario),
+                'subtotal': fmt(subtotal),
+                'descripcion': item.descripcion,
+            })
+
+        # Logo: preferir ticket_logo, luego logo general de empresa
+        logo_obj = empresa.ticket_logo if empresa.ticket_logo else empresa.logo
+        logo_url = f"{settings.SITE_URL.rstrip('/')}{logo_obj.url}" if logo_obj else None
+
         return {
             'ticket': ticket,
             'cliente': cliente,
             'empresa': empresa,
-            'items': items,
-            'total': total,
+            'items': items_enriquecidos,
+            'total': fmt(total),
             'moneda': moneda,
+            'logo_url': logo_url,
             'anio': datetime.now().year,
         }
 
@@ -50,35 +76,42 @@ class EmailService:
         moneda_map = {'PEN': 'S/', 'USD': '$', 'EUR': '€'}
         moneda = moneda_map.get(empresa.moneda, empresa.moneda)
 
+        try:
+            total_fmt = f"{float(ticket.calcular_total()):,.2f}"
+        except Exception:
+            total_fmt = "0.00"
+
+        contacto = empresa.email_contacto or empresa.telefono_contacto or ''
+
         if tipo == 'CREACION':
             return (
                 f"Hola {cliente.nombres},\n\n"
-                f"Hemos recibido tu pedido correctamente.\n"
-                f"Tu número de ticket es: #{ticket.numero_ticket}\n"
+                f"Hemos recibido su orden de servicio correctamente.\n"
+                f"Número de orden: {ticket.numero_ticket}\n"
                 f"Fecha de recepción: {ticket.fecha_recepcion.strftime('%d/%m/%Y %H:%M')}\n"
-                f"Entrega prometida: {ticket.fecha_prometida.strftime('%d/%m/%Y')}\n"
-                f"Total: {moneda} {ticket.calcular_total()}\n\n"
-                f"Recibirás un correo cuando tu pedido esté listo.\n\n"
+                f"Entrega estimada: {ticket.fecha_prometida.strftime('%d/%m/%Y')}\n"
+                f"Total: {moneda} {total_fmt}\n\n"
+                f"Le notificaremos cuando su orden esté lista.\n\n"
                 f"— {empresa.nombre}\n"
-                f"{empresa.telefono_contacto or ''}"
+                f"{contacto}"
             )
         elif tipo == 'LISTO':
             return (
                 f"Hola {cliente.nombres},\n\n"
-                f"¡Tu pedido #{ticket.numero_ticket} ya está LISTO!\n"
-                f"Total: {moneda} {ticket.calcular_total()}\n\n"
-                f"Puedes pasar a recogerlo a nuestro local.\n\n"
+                f"Su orden de servicio {ticket.numero_ticket} está lista.\n"
+                f"Total: {moneda} {total_fmt}\n\n"
+                f"Puede pasar a recogerla o coordinar la entrega con nosotros.\n\n"
                 f"— {empresa.nombre}\n"
-                f"{empresa.telefono_contacto or ''}"
+                f"{contacto}"
             )
         else:
             return (
                 f"Hola {cliente.nombres},\n\n"
-                f"¡Gracias! Tu pedido #{ticket.numero_ticket} ha sido entregado.\n"
-                f"Fue un placer atenderte.\n\n"
-                f"Esperamos verte pronto.\n\n"
+                f"Le confirmamos que su orden {ticket.numero_ticket} ha sido entregada.\n"
+                f"Gracias por confiar en {empresa.nombre}.\n"
+                f"Esperamos atenderle nuevamente.\n\n"
                 f"— {empresa.nombre}\n"
-                f"{empresa.telefono_contacto or ''}"
+                f"{contacto}"
             )
 
     @staticmethod
@@ -87,6 +120,11 @@ class EmailService:
         empresa = ticket.empresa
         if not empresa.notif_email_activas:
             return False, "Notificaciones de email desactivadas para esta empresa."
+
+        # Normalizar tipo
+        tipo = tipo.upper()
+        if tipo == 'ENTREGA':
+            tipo = 'ENTREGADO'
 
         # Validar Toggles de Eventos
         if tipo == 'CREACION' and not empresa.notif_event_creacion:
@@ -104,23 +142,18 @@ class EmailService:
         if not connection:
             return False, "Configuración SMTP incompleta para la empresa."
 
-        # Normalizar tipo
-        tipo = tipo.upper()
-        if tipo == 'ENTREGA':
-            tipo = 'ENTREGADO'
-
         # --- Subjects y Templates por tipo ---
         config = {
             'CREACION': {
-                'subject': f"Recibimos tu pedido ✅ · Ticket #{ticket.numero_ticket} — {empresa.nombre}",
+                'subject': f"Orden recibida · {ticket.numero_ticket} — {empresa.nombre}",
                 'template': 'notificaciones/emails/ticket_creacion.html',
             },
             'LISTO': {
-                'subject': f"¡Tu pedido está listo! ✨ · Ticket #{ticket.numero_ticket} — {empresa.nombre}",
+                'subject': f"Su orden está lista · {ticket.numero_ticket} — {empresa.nombre}",
                 'template': 'notificaciones/emails/ticket_listo.html',
             },
             'ENTREGADO': {
-                'subject': f"Entrega completada 🎉 · Ticket #{ticket.numero_ticket} — {empresa.nombre}",
+                'subject': f"Entrega completada · {ticket.numero_ticket} — {empresa.nombre}",
                 'template': 'notificaciones/emails/ticket_entregado.html',
             },
         }

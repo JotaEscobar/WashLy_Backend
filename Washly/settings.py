@@ -103,6 +103,9 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+# URL base del sitio — usada para construir URLs absolutas en emails
+SITE_URL = config('SITE_URL', default='http://localhost:8000')
+
 
 # =============================================================================
 # QR CODE

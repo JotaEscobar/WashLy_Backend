@@ -5,6 +5,7 @@ Actualizado para SaaS (Multi-tenant) y Pagos Dinámicos
 
 from rest_framework import serializers
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Sum
 from .models import Cliente, Ticket, TicketItem, EstadoHistorial
 from pagos.models import CajaSesion, Pago, MetodoPagoConfig
@@ -187,6 +188,7 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'numero_ticket', 'qr_code', 'creado_en', 'empresa', 'creado_por']
     
+    @transaction.atomic
     def create(self, validated_data):
         items_data = validated_data.pop('items')
         pago_monto = validated_data.pop('pago_monto', None)

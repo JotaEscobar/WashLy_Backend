@@ -11,6 +11,21 @@ from django.db import models
 logger = logging.getLogger(__name__)
 
 @shared_task
+def enviar_notificacion_ticket_async(ticket_id, tipo):
+    """
+    Envía notificación por email de forma asíncrona delegando a EmailService
+    """
+    from tickets.models import Ticket
+    from .services import EmailService
+    try:
+        ticket = Ticket.objects.get(id=ticket_id)
+        EmailService.send_ticket_notification(ticket, tipo=tipo)
+        return True
+    except Exception as e:
+        logger.error(f"Error en enviar_notificacion_ticket_async para ticket {ticket_id}: {e}")
+        return False
+
+@shared_task
 def enviar_notificacion_ticket(ticket_id, mensaje, canales=None):
     """
     Envía notificación sobre un ticket

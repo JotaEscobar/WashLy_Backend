@@ -3,220 +3,149 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>¡Tu pedido está listo! #{{ ticket.numero_ticket }}</title>
+  <title>Orden lista · {{ ticket.numero_ticket }} — {{ empresa.nombre }}</title>
   <style>
-    body { margin: 0; padding: 0; background-color: #f0fdf4; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-text-size-adjust: 100%; }
+    body { margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; -webkit-text-size-adjust: 100%; }
     * { box-sizing: border-box; }
-    .email-wrapper { width: 100%; background-color: #f0fdf4; padding: 32px 16px; }
-    .email-card { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+
+    .wrapper { width: 100%; background-color: #f3f4f6; padding: 32px 16px; }
+    .card    { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; }
+
     /* HEADER */
-    .header { background: linear-gradient(135deg, #065f46 0%, #047857 50%, #059669 100%); padding: 36px 40px 28px; text-align: center; }
-    .header-logo { max-height: 50px; max-width: 180px; margin-bottom: 20px; }
-    .header-emoji { font-size: 52px; display: block; margin-bottom: 12px; animation: none; }
-    .header-badge { display: inline-block; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); border-radius: 50px; padding: 6px 16px; color: #a7f3d0; font-size: 12px; font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 12px; }
-    .header-title { color: #ffffff; font-size: 28px; font-weight: 700; margin: 0 0 6px; line-height: 1.2; }
-    .header-subtitle { color: rgba(255,255,255,0.7); font-size: 14px; margin: 0; }
-    /* URGENCY BAND */
-    .urgency-band { background: #ecfdf5; border-bottom: 2px solid #d1fae5; padding: 14px 40px; display: flex; align-items: center; justify-content: center; gap: 8px; }
-    .urgency-text { font-size: 14px; color: #065f46; font-weight: 600; }
-    /* TICKET BANNER */
-    .ticket-banner { background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-left: 4px solid #10b981; padding: 18px 40px; display: flex; align-items: center; justify-content: space-between; }
-    .ticket-number-label { font-size: 12px; color: #6b7280; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
-    .ticket-number-value { font-size: 22px; font-weight: 700; color: #047857; font-family: 'Courier New', monospace; }
-    .ticket-status-badge { background: #dcfce7; border: 1px solid #86efac; border-radius: 50px; padding: 6px 14px; font-size: 12px; font-weight: 600; color: #16a34a; }
+    .header { background-color: #111827; padding: 32px 40px; text-align: center; }
+    .header img { max-height: 48px; max-width: 160px; display: block; margin: 0 auto; }
+    .header-name { color: #9ca3af; font-size: 13px; margin: 10px 0 0; letter-spacing: 0.3px; }
+
+    /* ORDER BAND */
+    .order-band { border-bottom: 1px solid #e5e7eb; padding: 20px 40px; }
+    .order-label  { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #6b7280; margin: 0 0 4px; }
+    .order-title  { font-size: 20px; font-weight: 700; color: #111827; margin: 0 0 4px; }
+    .order-number { font-size: 14px; color: #6b7280; margin: 0; font-family: 'Courier New', Courier, monospace; }
+    .order-status { display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 600; color: #065f46; background: #d1fae5; border: 1px solid #6ee7b7; border-radius: 4px; padding: 3px 10px; }
+
     /* BODY */
     .body { padding: 32px 40px; }
-    .greeting { font-size: 18px; font-weight: 600; color: #111827; margin: 0 0 8px; }
-    .intro-text { font-size: 15px; color: #4b5563; line-height: 1.6; margin: 0 0 28px; }
-    /* INFO GRID */
-    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
-    .info-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; }
-    .info-card-label { font-size: 11px; color: #9ca3af; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-    .info-card-value { font-size: 14px; color: #111827; font-weight: 600; }
-    /* HIGHLIGHT BOX — Instrucciones de recojo */
-    .section-title { font-size: 13px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin: 28px 0 12px; display: flex; align-items: center; gap: 8px; }
-    .section-title::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
-    .location-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 20px; margin-bottom: 24px; }
-    .location-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
-    .location-row:last-child { margin-bottom: 0; }
-    .location-icon { font-size: 20px; flex-shrink: 0; }
-    .location-text-main { font-size: 14px; font-weight: 600; color: #064e3b; }
-    .location-text-sub { font-size: 13px; color: #047857; margin-top: 2px; }
-    /* INSTRUCCIONES */
-    .steps-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 20px; margin-bottom: 28px; }
-    .step-item { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
-    .step-item:last-child { margin-bottom: 0; }
-    .step-num { width: 26px; height: 26px; background: #f59e0b; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .step-text { font-size: 14px; color: #92400e; line-height: 1.5; padding-top: 3px; }
-    /* TOTAL */
-    .total-card { background: #f9fafb; border: 2px solid #e5e7eb; border-radius: 12px; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; }
-    .total-label { font-size: 15px; font-weight: 600; color: #374151; }
-    .total-amount { font-size: 22px; font-weight: 700; color: #047857; }
-    /* CTA */
-    .cta-wrapper { text-align: center; margin-bottom: 24px; }
-    .cta-button { display: inline-block; background: linear-gradient(135deg, #10b981, #047857); color: #ffffff !important; text-decoration: none; padding: 14px 36px; border-radius: 50px; font-size: 15px; font-weight: 600; letter-spacing: 0.3px; box-shadow: 0 4px 15px rgba(16,185,129,0.35); }
+    .greeting { font-size: 16px; font-weight: 600; color: #111827; margin: 0 0 6px; }
+    .intro    { font-size: 14px; color: #4b5563; line-height: 1.6; margin: 0 0 28px; }
+
+    /* SUMMARY CARD */
+    .summary-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; margin-bottom: 24px; }
+    .summary-row  { display: flex; justify-content: space-between; align-items: center; padding: 11px 16px; border-bottom: 1px solid #e5e7eb; }
+    .summary-row:last-child { border-bottom: none; }
+    .summary-label { font-size: 13px; color: #6b7280; }
+    .summary-value { font-size: 13px; font-weight: 600; color: #111827; text-align: right; }
+    .summary-total-label { font-size: 14px; font-weight: 600; color: #374151; }
+    .summary-total-value { font-size: 18px; font-weight: 700; color: #111827; font-variant-numeric: tabular-nums; }
+
+    /* DELIVERY BLOCK */
+    .delivery-block { padding: 14px 16px; background: #f9fafb; border-left: 3px solid #374151; border-radius: 0 4px 4px 0; margin-bottom: 28px; }
+    .delivery-block-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: #6b7280; margin: 0 0 4px; }
+    .delivery-block p { font-size: 13px; color: #374151; margin: 0; line-height: 1.5; }
+    .delivery-block strong { color: #111827; }
+
+    /* CLOSING */
+    .closing { font-size: 13px; color: #6b7280; line-height: 1.6; margin: 0; }
+
     /* FOOTER */
-    .footer { background: #1f2937; padding: 28px 40px; text-align: center; }
-    .footer-company { font-size: 15px; font-weight: 600; color: #ffffff; margin: 0 0 6px; }
-    .footer-contact { font-size: 13px; color: #9ca3af; margin: 0 0 16px; line-height: 1.6; }
-    .footer-divider { height: 1px; background: #374151; margin: 16px 0; }
-    .footer-legal { font-size: 11px; color: #6b7280; margin: 0; }
-    @media (max-width: 480px) {
-      .body, .header, .ticket-banner, .urgency-band { padding-left: 20px !important; padding-right: 20px !important; }
-      .info-grid { grid-template-columns: 1fr !important; }
-      .ticket-banner { flex-direction: column; align-items: flex-start; gap: 8px; }
-      .header-title { font-size: 22px !important; }
+    .footer { background: #f9fafb; border-top: 1px solid #e5e7eb; padding: 20px 40px; text-align: center; }
+    .footer-company { font-size: 13px; font-weight: 600; color: #374151; margin: 0 0 4px; }
+    .footer-contact { font-size: 12px; color: #9ca3af; margin: 0 0 12px; line-height: 1.6; }
+    .footer-legal   { font-size: 11px; color: #9ca3af; margin: 0; }
+
+    @media (max-width: 520px) {
+      .body, .header, .order-band, .footer { padding-left: 20px !important; padding-right: 20px !important; }
+      .summary-row { flex-direction: column; align-items: flex-start; gap: 2px; }
+      .summary-value { text-align: left; }
     }
   </style>
 </head>
 <body>
-  <div class="email-wrapper">
-    <div class="email-card">
+<div class="wrapper">
+  <div class="card">
 
-      <!-- HEADER -->
-      <div class="header">
-        {% if empresa.logo %}
-          <img src="{{ empresa.logo.url }}" alt="{{ empresa.nombre }}" class="header-logo" />
-        {% endif %}
-        <span class="header-emoji">✨</span>
-        <div class="header-badge">🎉 Pedido Completado</div>
-        <h1 class="header-title">¡Tu pedido está listo!</h1>
-        <p class="header-subtitle">Ya puedes recoger tu ropa · {{ empresa.nombre }}</p>
+    <!-- HEADER -->
+    <div class="header">
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="{{ empresa.nombre }}" />
+      {% else %}
+        <div class="header-name">{{ empresa.nombre }}</div>
+      {% endif %}
+      {% if logo_url %}<p class="header-name">{{ empresa.nombre }}</p>{% endif %}
+    </div>
+
+    <!-- ORDER BAND -->
+    <div class="order-band">
+      <p class="order-label">Orden de Servicio</p>
+      <p class="order-title">Su orden está lista</p>
+      <p class="order-number">{{ ticket.numero_ticket }}</p>
+      <span class="order-status">Lista para entregar</span>
+    </div>
+
+    <!-- BODY -->
+    <div class="body">
+      <p class="greeting">Hola, {{ cliente.nombres }}.</p>
+      <p class="intro">
+        Su orden de servicio ha sido completada y está lista.
+        A continuación el resumen.
+      </p>
+
+      <!-- SUMMARY CARD -->
+      <div class="summary-card">
+        <div class="summary-row">
+          <span class="summary-label">Número de orden</span>
+          <span class="summary-value" style="font-family:'Courier New',monospace;">{{ ticket.numero_ticket }}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Fecha de recepción</span>
+          <span class="summary-value">{{ ticket.fecha_recepcion|date:"d/m/Y" }}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Servicios</span>
+          <span class="summary-value">{{ items|length }} item{% if items|length != 1 %}s{% endif %}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-total-label">Total</span>
+          <span class="summary-total-value">{{ moneda }} {{ total }}</span>
+        </div>
       </div>
 
-      <!-- URGENCY BAND -->
-      <div class="urgency-band">
-        <span>⏰</span>
-        <span class="urgency-text">Tu ropa te espera lista y perfecta para llevarte</span>
-      </div>
-
-      <!-- TICKET NUMBER BANNER -->
-      <div class="ticket-banner">
-        <div>
-          <div class="ticket-number-label">Número de Ticket</div>
-          <div class="ticket-number-value">#{{ ticket.numero_ticket }}</div>
-        </div>
-        <div class="ticket-status-badge">✨ Listo</div>
-      </div>
-
-      <!-- BODY -->
-      <div class="body">
-
-        <p class="greeting">¡Buenas noticias, {{ cliente.nombres }}! 🎊</p>
-        <p class="intro-text">
-          Tu ropa ya está limpia, planchada y lista para ser recogida.
-          Nuestro equipo ha terminado de procesar toda tu orden con el máximo cuidado.
-        </p>
-
-        <!-- INFO GRID -->
-        <div class="info-grid">
-          <div class="info-card">
-            <div class="info-card-label">🏷️ N° de Ticket</div>
-            <div class="info-card-value">#{{ ticket.numero_ticket }}</div>
-          </div>
-          <div class="info-card">
-            <div class="info-card-label">✅ Estado</div>
-            <div class="info-card-value" style="color:#16a34a;">Listo ✔</div>
-          </div>
-          <div class="info-card">
-            <div class="info-card-label">📅 Fecha Recepción</div>
-            <div class="info-card-value">{{ ticket.fecha_recepcion|date:"d/m/Y" }}</div>
-          </div>
-          <div class="info-card">
-            <div class="info-card-label">📦 Tipo de Entrega</div>
-            <div class="info-card-value">{{ ticket.get_tipo_entrega_display }}</div>
-          </div>
-        </div>
-
-        <!-- TOTAL -->
-        <div class="total-card">
-          <span class="total-label">💰 Total del Servicio</span>
-          <span class="total-amount">{{ moneda }} {{ total }}</span>
-        </div>
-
-        {% if ticket.tipo_entrega == 'RECOJO' %}
-        <!-- INSTRUCCIONES DE RECOJO -->
-        <div class="section-title">Para recoger tu pedido</div>
-        <div class="location-box">
-          {% if empresa.sede_principal_direccion or empresa.direccion_fiscal %}
-          <div class="location-row">
-            <span class="location-icon">📍</span>
-            <div>
-              <div class="location-text-main">Nuestra ubicación</div>
-              <div class="location-text-sub">{{ ticket.sede.direccion|default:empresa.direccion_fiscal }}</div>
-            </div>
-          </div>
-          {% endif %}
-          {% if empresa.telefono_contacto %}
-          <div class="location-row">
-            <span class="location-icon">📞</span>
-            <div>
-              <div class="location-text-main">Teléfono</div>
-              <div class="location-text-sub">{{ empresa.telefono_contacto }}</div>
-            </div>
-          </div>
-          {% endif %}
-        </div>
-
-        <div class="steps-box">
-          <div class="step-item">
-            <div class="step-num">1</div>
-            <div class="step-text">Ven a nuestro local en el horario de atención.</div>
-          </div>
-          <div class="step-item">
-            <div class="step-num">2</div>
-            <div class="step-text">Presenta tu número de ticket: <strong>#{{ ticket.numero_ticket }}</strong></div>
-          </div>
-          <div class="step-item">
-            <div class="step-num">3</div>
-            <div class="step-text">Realiza el pago si aún tienes saldo pendiente y llévate tu ropa.</div>
-          </div>
-        </div>
-
+      <!-- DELIVERY BLOCK -->
+      <div class="delivery-block">
+        <p class="delivery-block-title">Modalidad de entrega</p>
+        {% if ticket.tipo_entrega == 'DELIVERY' %}
+          <p>Le contactaremos para <strong>coordinar la entrega a domicilio</strong>.<br>Por favor mantenga su teléfono disponible.</p>
         {% else %}
-        <!-- INFO DELIVERY -->
-        <div class="steps-box">
-          <div class="step-item">
-            <div class="step-num">1</div>
-            <div class="step-text">En breve nos comunicaremos contigo para coordinar la entrega a domicilio.</div>
-          </div>
-          <div class="step-item">
-            <div class="step-num">2</div>
-            <div class="step-text">Prepara el pago si aún tienes saldo pendiente: <strong>{{ moneda }} {{ total }}</strong></div>
-          </div>
-          <div class="step-item">
-            <div class="step-num">3</div>
-            <div class="step-text">Recibe y revisa tu ropa al momento de la entrega.</div>
-          </div>
-        </div>
+          <p>Puede <strong>recoger su orden en nuestro establecimiento</strong>.<br>Presente este correo o su número de orden en caja.</p>
         {% endif %}
-
-        {% if empresa.email_contacto %}
-        <div class="cta-wrapper">
-          <a href="mailto:{{ empresa.email_contacto }}?subject=Consulta+Ticket+%23{{ ticket.numero_ticket }}" class="cta-button">
-            📩 ¿Tienes alguna consulta?
-          </a>
-        </div>
-        {% endif %}
-
-      </div><!-- /body -->
-
-      <!-- FOOTER -->
-      <div class="footer">
-        <p class="footer-company">{{ empresa.nombre }}</p>
-        <p class="footer-contact">
-          {% if empresa.telefono_contacto %}📞 {{ empresa.telefono_contacto }}&nbsp;&nbsp;{% endif %}
-          {% if empresa.email_contacto %}✉️ {{ empresa.email_contacto }}{% endif %}
-          {% if empresa.direccion_fiscal %}<br>📍 {{ empresa.direccion_fiscal }}{% endif %}
-        </p>
-        <div class="footer-divider"></div>
-        <p class="footer-legal">
-          Este correo fue generado automáticamente. Por favor no respondas directamente a este email.<br>
-          © {{ empresa.nombre }} · {{ anio }} · Todos los derechos reservados.
-        </p>
       </div>
 
-    </div><!-- /email-card -->
-  </div><!-- /email-wrapper -->
+      <!-- CLOSING -->
+      <p class="closing">
+        Si tiene alguna consulta, contáctenos en
+        {% if empresa.email_contacto %}
+          <a href="mailto:{{ empresa.email_contacto }}" style="color:#2563eb; text-decoration:none;">{{ empresa.email_contacto }}</a>{% if empresa.telefono_contacto %} o al {{ empresa.telefono_contacto }}{% endif %}.
+        {% elif empresa.telefono_contacto %}
+          {{ empresa.telefono_contacto }}.
+        {% endif %}
+      </p>
+    </div>
+
+    <!-- FOOTER -->
+    <div class="footer">
+      <p class="footer-company">{{ empresa.nombre }}</p>
+      <p class="footer-contact">
+        {% if empresa.telefono_contacto %}{{ empresa.telefono_contacto }}{% endif %}
+        {% if empresa.telefono_contacto and empresa.email_contacto %} &nbsp;·&nbsp; {% endif %}
+        {% if empresa.email_contacto %}{{ empresa.email_contacto }}{% endif %}
+        {% if empresa.direccion_fiscal %}<br>{{ empresa.direccion_fiscal }}{% endif %}
+      </p>
+      <p class="footer-legal">
+        Este mensaje fue generado automáticamente. Por favor no responda directamente a este correo.<br>
+        &copy; {{ anio }} {{ empresa.nombre }}{% if empresa.ticket_disclaimer %} &nbsp;·&nbsp; {{ empresa.ticket_disclaimer }}{% endif %}
+      </p>
+    </div>
+
+  </div>
+</div>
 </body>
 </html>

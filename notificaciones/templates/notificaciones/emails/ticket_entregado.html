@@ -3,194 +3,148 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Entrega Completada · Ticket #{{ ticket.numero_ticket }}</title>
+  <title>Entrega completada · {{ ticket.numero_ticket }} — {{ empresa.nombre }}</title>
   <style>
-    body { margin: 0; padding: 0; background-color: #faf5ff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-text-size-adjust: 100%; }
+    body { margin: 0; padding: 0; background-color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111827; -webkit-text-size-adjust: 100%; }
     * { box-sizing: border-box; }
-    .email-wrapper { width: 100%; background-color: #faf5ff; padding: 32px 16px; }
-    .email-card { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+
+    .wrapper { width: 100%; background-color: #f3f4f6; padding: 32px 16px; }
+    .card    { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; }
+
     /* HEADER */
-    .header { background: linear-gradient(135deg, #4c1d95 0%, #6d28d9 50%, #7c3aed 100%); padding: 36px 40px 28px; text-align: center; }
-    .header-logo { max-height: 50px; max-width: 180px; margin-bottom: 20px; }
-    .header-emoji { font-size: 52px; display: block; margin-bottom: 12px; }
-    .header-badge { display: inline-block; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.25); border-radius: 50px; padding: 6px 16px; color: #ddd6fe; font-size: 12px; font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 12px; }
-    .header-title { color: #ffffff; font-size: 28px; font-weight: 700; margin: 0 0 6px; line-height: 1.2; }
-    .header-subtitle { color: rgba(255,255,255,0.7); font-size: 14px; margin: 0; }
-    /* TICKET BANNER */
-    .ticket-banner { background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%); border-left: 4px solid #7c3aed; padding: 18px 40px; display: flex; align-items: center; justify-content: space-between; }
-    .ticket-number-label { font-size: 12px; color: #6b7280; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
-    .ticket-number-value { font-size: 22px; font-weight: 700; color: #6d28d9; font-family: 'Courier New', monospace; }
-    .ticket-status-badge { background: #ede9fe; border: 1px solid #c4b5fd; border-radius: 50px; padding: 6px 14px; font-size: 12px; font-weight: 600; color: #7c3aed; }
+    .header { background-color: #111827; padding: 32px 40px; text-align: center; }
+    .header img { max-height: 48px; max-width: 160px; display: block; margin: 0 auto; }
+    .header-name { color: #9ca3af; font-size: 13px; margin: 10px 0 0; letter-spacing: 0.3px; }
+
+    /* ORDER BAND */
+    .order-band { border-bottom: 1px solid #e5e7eb; padding: 20px 40px; }
+    .order-label  { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #6b7280; margin: 0 0 4px; }
+    .order-title  { font-size: 20px; font-weight: 700; color: #111827; margin: 0 0 4px; }
+    .order-number { font-size: 14px; color: #6b7280; margin: 0; font-family: 'Courier New', Courier, monospace; }
+    .order-status { display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 600; color: #374151; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px; padding: 3px 10px; }
+
     /* BODY */
     .body { padding: 32px 40px; }
-    .greeting { font-size: 18px; font-weight: 600; color: #111827; margin: 0 0 8px; }
-    .intro-text { font-size: 15px; color: #4b5563; line-height: 1.6; margin: 0 0 28px; }
+    .greeting { font-size: 16px; font-weight: 600; color: #111827; margin: 0 0 6px; }
+    .intro    { font-size: 14px; color: #4b5563; line-height: 1.6; margin: 0 0 28px; }
+
     /* SUMMARY CARD */
-    .summary-card { background: linear-gradient(135deg, #f5f3ff 0%, #fdf4ff 100%); border: 1px solid #e9d5ff; border-radius: 14px; padding: 20px; margin-bottom: 28px; }
-    .summary-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #ede9fe; }
-    .summary-row:last-child { border-bottom: none; padding-bottom: 0; }
-    .summary-row:first-child { padding-top: 0; }
+    .summary-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; margin-bottom: 28px; }
+    .summary-row  { display: flex; justify-content: space-between; align-items: center; padding: 11px 16px; border-bottom: 1px solid #e5e7eb; }
+    .summary-row:last-child { border-bottom: none; }
     .summary-label { font-size: 13px; color: #6b7280; }
-    .summary-value { font-size: 14px; font-weight: 600; color: #111827; }
-    .summary-total-label { font-size: 15px; font-weight: 700; color: #374151; }
-    .summary-total-value { font-size: 20px; font-weight: 700; color: #6d28d9; }
+    .summary-value { font-size: 13px; font-weight: 600; color: #111827; }
+    .summary-total-label { font-size: 14px; font-weight: 600; color: #374151; }
+    .summary-total-value { font-size: 18px; font-weight: 700; color: #111827; font-variant-numeric: tabular-nums; }
+
     /* DIVIDER */
-    .section-title { font-size: 13px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin: 28px 0 12px; display: flex; align-items: center; gap: 8px; }
-    .section-title::after { content: ''; flex: 1; height: 1px; background: #e5e7eb; }
-    /* THANK YOU CARD */
-    .thankyou-card { background: #fdf4ff; border: 1px solid #f0abfc; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 28px; }
-    .thankyou-stars { font-size: 22px; letter-spacing: 4px; margin-bottom: 8px; }
-    .thankyou-text { font-size: 15px; color: #701a75; font-weight: 600; margin: 0 0 4px; }
-    .thankyou-subtext { font-size: 13px; color: #a21caf; margin: 0; }
-    /* VALUE PROPS */
-    .value-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 28px; }
-    .value-card { text-align: center; padding: 14px 8px; background: #f9fafb; border-radius: 10px; border: 1px solid #e5e7eb; }
-    .value-icon { font-size: 24px; margin-bottom: 6px; }
-    .value-label { font-size: 11px; color: #6b7280; font-weight: 500; }
-    /* CTA */
-    .cta-wrapper { text-align: center; margin-bottom: 24px; }
-    .cta-button { display: inline-block; background: linear-gradient(135deg, #7c3aed, #6d28d9); color: #ffffff !important; text-decoration: none; padding: 14px 36px; border-radius: 50px; font-size: 15px; font-weight: 600; letter-spacing: 0.3px; box-shadow: 0 4px 15px rgba(124,58,237,0.35); margin-right: 12px; }
-    .cta-secondary { display: inline-block; background: transparent; border: 2px solid #7c3aed; color: #7c3aed !important; text-decoration: none; padding: 12px 28px; border-radius: 50px; font-size: 14px; font-weight: 600; }
-    /* PROMO BAND */
-    .promo-band { background: linear-gradient(135deg, #fef3c7, #fde68a); border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; text-align: center; }
-    .promo-text { font-size: 14px; color: #92400e; font-weight: 600; margin: 0; }
-    .promo-subtext { font-size: 12px; color: #b45309; margin: 4px 0 0; }
+    .divider { border: none; border-top: 1px solid #e5e7eb; margin: 0; }
+
+    /* CLOSING */
+    .closing { font-size: 14px; color: #4b5563; line-height: 1.7; margin: 0 0 8px; }
+    .closing-contact { font-size: 13px; color: #6b7280; line-height: 1.6; margin: 16px 0 0; }
+
     /* FOOTER */
-    .footer { background: #1f2937; padding: 28px 40px; text-align: center; }
-    .footer-company { font-size: 15px; font-weight: 600; color: #ffffff; margin: 0 0 6px; }
-    .footer-contact { font-size: 13px; color: #9ca3af; margin: 0 0 16px; line-height: 1.6; }
-    .footer-divider { height: 1px; background: #374151; margin: 16px 0; }
-    .footer-legal { font-size: 11px; color: #6b7280; margin: 0; }
-    @media (max-width: 480px) {
-      .body, .header, .ticket-banner { padding-left: 20px !important; padding-right: 20px !important; }
-      .value-grid { grid-template-columns: 1fr !important; }
-      .ticket-banner { flex-direction: column; align-items: flex-start; gap: 8px; }
-      .header-title { font-size: 22px !important; }
-      .cta-button, .cta-secondary { display: block; margin: 0 0 10px; }
+    .footer { background: #f9fafb; border-top: 1px solid #e5e7eb; padding: 20px 40px; text-align: center; }
+    .footer-company { font-size: 13px; font-weight: 600; color: #374151; margin: 0 0 4px; }
+    .footer-contact { font-size: 12px; color: #9ca3af; margin: 0 0 12px; line-height: 1.6; }
+    .footer-legal   { font-size: 11px; color: #9ca3af; margin: 0; }
+
+    @media (max-width: 520px) {
+      .body, .header, .order-band, .footer { padding-left: 20px !important; padding-right: 20px !important; }
+      .summary-row { flex-direction: column; align-items: flex-start; gap: 2px; }
     }
   </style>
 </head>
 <body>
-  <div class="email-wrapper">
-    <div class="email-card">
+<div class="wrapper">
+  <div class="card">
 
-      <!-- HEADER -->
-      <div class="header">
-        {% if empresa.logo %}
-          <img src="{{ empresa.logo.url }}" alt="{{ empresa.nombre }}" class="header-logo" />
+    <!-- HEADER -->
+    <div class="header">
+      {% if logo_url %}
+        <img src="{{ logo_url }}" alt="{{ empresa.nombre }}" />
+      {% else %}
+        <div class="header-name">{{ empresa.nombre }}</div>
+      {% endif %}
+      {% if logo_url %}<p class="header-name">{{ empresa.nombre }}</p>{% endif %}
+    </div>
+
+    <!-- ORDER BAND -->
+    <div class="order-band">
+      <p class="order-label">Orden de Servicio</p>
+      <p class="order-title">Entrega completada</p>
+      <p class="order-number">{{ ticket.numero_ticket }}</p>
+      <span class="order-status">Entregado</span>
+    </div>
+
+    <!-- BODY -->
+    <div class="body">
+      <p class="greeting">Hola, {{ cliente.nombres }}.</p>
+      <p class="intro">
+        Le confirmamos que su orden de servicio ha sido entregada satisfactoriamente.
+      </p>
+
+      <!-- SUMMARY CARD -->
+      <div class="summary-card">
+        <div class="summary-row">
+          <span class="summary-label">Número de orden</span>
+          <span class="summary-value" style="font-family:'Courier New',monospace;">{{ ticket.numero_ticket }}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Fecha de recepción</span>
+          <span class="summary-value">{{ ticket.fecha_recepcion|date:"d/m/Y" }}</span>
+        </div>
+        {% if ticket.fecha_entrega %}
+        <div class="summary-row">
+          <span class="summary-label">Fecha de entrega</span>
+          <span class="summary-value">{{ ticket.fecha_entrega|date:"d/m/Y H:i" }}</span>
+        </div>
         {% endif %}
-        <span class="header-emoji">🎉</span>
-        <div class="header-badge">🏆 Entrega Completada</div>
-        <h1 class="header-title">¡Listo! Entrega confirmada</h1>
-        <p class="header-subtitle">Esperamos que tu ropa haya quedado perfecta · {{ empresa.nombre }}</p>
+        <div class="summary-row">
+          <span class="summary-total-label">Total</span>
+          <span class="summary-total-value">{{ moneda }} {{ total }}</span>
+        </div>
       </div>
 
-      <!-- TICKET BANNER -->
-      <div class="ticket-banner">
-        <div>
-          <div class="ticket-number-label">Número de Ticket</div>
-          <div class="ticket-number-value">#{{ ticket.numero_ticket }}</div>
-        </div>
-        <div class="ticket-status-badge">✅ Entregado</div>
-      </div>
+      <hr class="divider" />
 
-      <!-- BODY -->
-      <div class="body">
+      <!-- CLOSING -->
+      <p class="closing" style="margin-top: 24px;">
+        Gracias por confiar en <strong>{{ empresa.nombre }}</strong>.<br>
+        Esperamos atenderle nuevamente.
+      </p>
 
-        <p class="greeting">Gracias, {{ cliente.nombres }} ✨</p>
-        <p class="intro-text">
-          Tu pedido ha sido entregado con éxito. Gracias por elegir <strong>{{ empresa.nombre }}</strong>.
-          Fue un placer cuidar de tu ropa.
-        </p>
+      {% if empresa.ticket_mensaje_pie %}
+      <p class="closing-contact" style="font-style: italic;">{{ empresa.ticket_mensaje_pie }}</p>
+      {% endif %}
 
-        <!-- RESUMEN COMPACTO -->
-        <div class="section-title">Resumen del Servicio</div>
-        <div class="summary-card">
-          <div class="summary-row">
-            <span class="summary-label">📋 N° de Ticket</span>
-            <span class="summary-value">#{{ ticket.numero_ticket }}</span>
-          </div>
-          <div class="summary-row">
-            <span class="summary-label">📅 Fecha Recepción</span>
-            <span class="summary-value">{{ ticket.fecha_recepcion|date:"d/m/Y" }}</span>
-          </div>
-          {% if ticket.fecha_entrega %}
-          <div class="summary-row">
-            <span class="summary-label">🚚 Fecha Entrega</span>
-            <span class="summary-value">{{ ticket.fecha_entrega|date:"d/m/Y H:i" }}</span>
-          </div>
-          {% endif %}
-          <div class="summary-row">
-            <span class="summary-label">📦 Tipo de Entrega</span>
-            <span class="summary-value">{{ ticket.get_tipo_entrega_display }}</span>
-          </div>
-          <div class="summary-row">
-            <span class="summary-total-label">💰 Total del Servicio</span>
-            <span class="summary-total-value">{{ moneda }} {{ total }}</span>
-          </div>
-        </div>
+      <p class="closing-contact">
+        Para cualquier consulta, contáctenos en
+        {% if empresa.email_contacto %}
+          <a href="mailto:{{ empresa.email_contacto }}" style="color:#2563eb; text-decoration:none;">{{ empresa.email_contacto }}</a>{% if empresa.telefono_contacto %} o al {{ empresa.telefono_contacto }}{% endif %}.
+        {% elif empresa.telefono_contacto %}
+          {{ empresa.telefono_contacto }}.
+        {% endif %}
+      </p>
+    </div>
 
-        <!-- VALUE PROPS -->
-        <div class="value-grid">
-          <div class="value-card">
-            <div class="value-icon">🧼</div>
-            <div class="value-label">Lavado Profesional</div>
-          </div>
-          <div class="value-card">
-            <div class="value-icon">💚</div>
-            <div class="value-label">Cuidado Premium</div>
-          </div>
-          <div class="value-card">
-            <div class="value-icon">⚡</div>
-            <div class="value-label">Entrega Puntual</div>
-          </div>
-        </div>
+    <!-- FOOTER -->
+    <div class="footer">
+      <p class="footer-company">{{ empresa.nombre }}</p>
+      <p class="footer-contact">
+        {% if empresa.telefono_contacto %}{{ empresa.telefono_contacto }}{% endif %}
+        {% if empresa.telefono_contacto and empresa.email_contacto %} &nbsp;·&nbsp; {% endif %}
+        {% if empresa.email_contacto %}{{ empresa.email_contacto }}{% endif %}
+        {% if empresa.direccion_fiscal %}<br>{{ empresa.direccion_fiscal }}{% endif %}
+      </p>
+      <p class="footer-legal">
+        Este mensaje fue generado automáticamente. Por favor no responda directamente a este correo.<br>
+        &copy; {{ anio }} {{ empresa.nombre }}{% if empresa.ticket_disclaimer %} &nbsp;·&nbsp; {{ empresa.ticket_disclaimer }}{% endif %}
+      </p>
+    </div>
 
-        <!-- THANKS CARD -->
-        <div class="thankyou-card">
-          <div class="thankyou-stars">⭐⭐⭐⭐⭐</div>
-          <p class="thankyou-text">¿Quedaste satisfecho con el servicio?</p>
-          <p class="thankyou-subtext">Tu opinión nos ayuda a mejorar cada día. ¡Cuéntanos cómo fue tu experiencia!</p>
-        </div>
-
-        <!-- PROMO -->
-        <div class="promo-band">
-          <p class="promo-text">🎁 ¡Vuelve pronto y disfruta de nuestros servicios!</p>
-          <p class="promo-subtext">Recuerda que estamos aquí para cuidar tu ropa cada vez que lo necesites.</p>
-        </div>
-
-        <!-- CTA -->
-        <div class="cta-wrapper">
-          {% if empresa.email_contacto %}
-          <a href="mailto:{{ empresa.email_contacto }}?subject=Calificación+Servicio+%23{{ ticket.numero_ticket }}" class="cta-button">
-            ⭐ Calificar servicio
-          </a>
-          {% endif %}
-          {% if empresa.email_contacto %}
-          <a href="mailto:{{ empresa.email_contacto }}?subject=Nuevo+Servicio+-+{{ cliente.nombres }}" class="cta-secondary">
-            🧺 Nuevo pedido
-          </a>
-          {% endif %}
-        </div>
-
-      </div><!-- /body -->
-
-      <!-- FOOTER -->
-      <div class="footer">
-        <p class="footer-company">{{ empresa.nombre }}</p>
-        <p class="footer-contact">
-          {% if empresa.telefono_contacto %}📞 {{ empresa.telefono_contacto }}&nbsp;&nbsp;{% endif %}
-          {% if empresa.email_contacto %}✉️ {{ empresa.email_contacto }}{% endif %}
-          {% if empresa.direccion_fiscal %}<br>📍 {{ empresa.direccion_fiscal }}{% endif %}
-        </p>
-        <div class="footer-divider"></div>
-        <p class="footer-legal">
-          Este correo fue generado automáticamente. Por favor no respondas directamente a este email.<br>
-          © {{ empresa.nombre }} · {{ anio }} · Todos los derechos reservados.
-        </p>
-      </div>
-
-    </div><!-- /email-card -->
-  </div><!-- /email-wrapper -->
+  </div>
+</div>
 </body>
 </html>

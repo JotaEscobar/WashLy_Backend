@@ -15,7 +15,7 @@ Sistema ERP SaaS modular para gestión de lavanderías. Backend en Django REST F
 | **Notificaciones** | Email/WhatsApp/SMS automáticos vía Celery |
 | **Reportes** | Dashboard KPIs, analítica, reportes PDF |
 | **Multi-sede** | Sucursales con contexto via header, roles por sede |
-| **SaaS** | Multi-tenant, suscripciones, panel de proveedor |
+| **SaaS** | Multi-tenant, suscripciones |
 
 ## 📋 Stack Tecnológico
 
@@ -154,7 +154,7 @@ washly-frontend/           ← Frontend React
 │   ├── api/               ← Axios config, auth, token refresh
 │   ├── components/        ← Componentes reutilizables
 │   ├── context/           ← AuthContext
-│   ├── layouts/           ← MainLayout, ProviderLayout
+│   ├── layouts/           ← MainLayout
 │   ├── pages/             ← Páginas principales
 │   ├── stores/            ← Zustand stores
 │   └── utils/             ← Utilidades

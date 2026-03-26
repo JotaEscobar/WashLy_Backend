@@ -121,9 +121,18 @@ class TicketViewSet(BaseTenantViewSet):
         # Primero realizar creación estándar (asociar empresa/sede) via BaseTenantViewSet
         super().perform_create(serializer)
         
-        # Enviar notificación de creación
+        # Enviar notificación de creación de forma asíncrona (con fallback seguro)
+        from notificaciones.tasks import enviar_notificacion_ticket_async
         from notificaciones.services import EmailService
-        EmailService.send_ticket_notification(serializer.instance, tipo='CREACION')
+        import threading
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            enviar_notificacion_ticket_async.delay(serializer.instance.id, tipo='CREACION')
+        except Exception as e:
+            logger.warning(f"Celery broker no disponible. Usando fallback con threading local: {e}")
+            threading.Thread(target=EmailService.send_ticket_notification, args=(serializer.instance, 'CREACION')).start()
 
     @action(detail=True, methods=['post'])
     def update_estado(self, request, pk=None):
@@ -139,12 +148,19 @@ class TicketViewSet(BaseTenantViewSet):
             if not exito:
                 return Response({'error': mensaje}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Enviar notificación si el estado es LISTO o ENTREGADO
+            # Enviar notificación asíncrona segura si el estado es LISTO o ENTREGADO
+            from notificaciones.tasks import enviar_notificacion_ticket_async
             from notificaciones.services import EmailService
-            if nuevo_estado == 'LISTO':
-                EmailService.send_ticket_notification(ticket, tipo='LISTO')
-            elif nuevo_estado == 'ENTREGADO':
-                EmailService.send_ticket_notification(ticket, tipo='ENTREGADO')
+            import threading
+            import logging
+            logger = logging.getLogger(__name__)
+
+            if nuevo_estado in ['LISTO', 'ENTREGADO']:
+                try:
+                    enviar_notificacion_ticket_async.delay(ticket.id, tipo=nuevo_estado)
+                except Exception as e:
+                    logger.warning(f"Celery no disponible. Usando Thread nativo para notificar cambio a {nuevo_estado}: {e}")
+                    threading.Thread(target=EmailService.send_ticket_notification, args=(ticket, nuevo_estado)).start()
             
             return Response({
                 'status': 'Estado actualizado',
