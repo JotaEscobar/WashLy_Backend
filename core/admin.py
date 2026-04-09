@@ -43,7 +43,7 @@ class EmpresaAdmin(admin.ModelAdmin):
             return "-"
         
         hoy = timezone.now()
-        color = "green"
+        color = "#007bff"  # Elegant Blue
         if obj.fecha_vencimiento < hoy:
             color = "red"
         elif obj.fecha_vencimiento < hoy + timedelta(days=7):

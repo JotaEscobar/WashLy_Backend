@@ -171,6 +171,7 @@ washly-frontend/           ← Frontend React
 - **Middleware de sede** con validación de acceso
 - **Seguridad de producción** (HSTS, cookies seguras, XSS protection)
 - **Logging estructurado** para auditoría
+- **Cifrado de campos sensibles**: Contraseñas SMTP cifradas (AES-256) en la base de datos
 
 ## 🚀 Despliegue en Producción
 

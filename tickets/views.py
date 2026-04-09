@@ -6,7 +6,7 @@ Actualizado para SaaS: Filtros por Empresa, CRM Seguro y Dashboard Multi-tenant
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny # ✅ Added AllowAny
 from django.db.models import Q, Sum, F, DecimalField, OuterRef, Subquery, Max, Count, Prefetch  # ✅ Agregados Count y Prefetch
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -25,6 +25,12 @@ from core.views import BaseTenantViewSet
 
 
 from .services import ClienteService, TicketService
+from notificaciones.tasks import enviar_notificacion_ticket_async
+from notificaciones.services import EmailService
+import threading
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ClienteViewSet(BaseTenantViewSet):
     queryset = Cliente.objects.all()
@@ -99,34 +105,13 @@ class TicketViewSet(BaseTenantViewSet):
         return TicketService.get_filtered_tickets(empresa, sede, filters_dict)
     
     def list(self, request, *args, **kwargs):
-        # Mantenemos el mapeo de ultimo_metodo_pago si no está en el serializer base
-        response = super().list(request, *args, **kwargs)
-        data_list = response.data['results'] if 'results' in response.data else response.data
-        
-        # El servicio anotó el queryset con 'ultimo_metodo_pago'
-        # Si el serializer no lo incluye, lo agregamos manualmente aquí (o actualizar serializer)
-        if isinstance(data_list, list):
-            # Obtener el mapeo directamente del queryset anotado
-            queryset = self.filter_queryset(self.get_queryset())
-            # Optimizamos: solo iteramos sobre los IDs cargados en esta página
-            page_ids = [item['id'] for item in data_list]
-            ticket_map = {t.id: t.ultimo_metodo_pago for t in queryset.filter(id__in=page_ids)}
-            
-            for item in data_list:
-                item['ultimo_metodo_pago'] = ticket_map.get(item['id'])
-            
-        return response
+        # El servicio ya anota el queryset con 'ultimo_metodo_pago'
+        # y el TicketListSerializer ahora incluye ese campo.
+        return super().list(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         # Primero realizar creación estándar (asociar empresa/sede) via BaseTenantViewSet
         super().perform_create(serializer)
-        
-        # Enviar notificación de creación de forma asíncrona (con fallback seguro)
-        from notificaciones.tasks import enviar_notificacion_ticket_async
-        from notificaciones.services import EmailService
-        import threading
-        import logging
-        logger = logging.getLogger(__name__)
         
         try:
             enviar_notificacion_ticket_async.delay(serializer.instance.id, tipo='CREACION')
@@ -148,13 +133,6 @@ class TicketViewSet(BaseTenantViewSet):
             if not exito:
                 return Response({'error': mensaje}, status=status.HTTP_400_BAD_REQUEST)
             
-            # Enviar notificación asíncrona segura si el estado es LISTO o ENTREGADO
-            from notificaciones.tasks import enviar_notificacion_ticket_async
-            from notificaciones.services import EmailService
-            import threading
-            import logging
-            logger = logging.getLogger(__name__)
-
             if nuevo_estado in ['LISTO', 'ENTREGADO']:
                 try:
                     enviar_notificacion_ticket_async.delay(ticket.id, tipo=nuevo_estado)
@@ -182,7 +160,7 @@ class TicketViewSet(BaseTenantViewSet):
             )
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
+
     @action(detail=True, methods=['get'])
     def imprimir(self, request, pk=None):
         ticket = self.get_object()
@@ -204,3 +182,20 @@ class TicketViewSet(BaseTenantViewSet):
         tickets_activos = self.get_queryset()
         stats = TicketService.get_dashboard_stats(tickets_activos)
         return Response(stats)
+
+    @action(detail=False, methods=['get'], permission_classes=[AllowAny])
+    def public_tracking(self, request):
+        """Endpoint público para seguimiento de pedido por UUID"""
+        uuid_str = request.query_params.get('id')
+        
+        if not uuid_str:
+            return Response({'error': 'ID de seguimiento requerido'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        try:
+            # Ahora usamos tracking_uuid para mayor seguridad (no adivinable)
+            ticket = Ticket.objects.get(tracking_uuid=uuid_str, activo=True)
+                
+            from .serializers import TicketPublicSerializer
+            return Response(TicketPublicSerializer(ticket).data)
+        except (Ticket.DoesNotExist, ValueError, TypeError):
+            return Response({'error': 'Orden no encontrada'}, status=status.HTTP_404_NOT_FOUND)

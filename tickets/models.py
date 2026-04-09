@@ -3,6 +3,7 @@ Modelos para la gestión de tickets/órdenes de servicio
 Actualizado para SaaS (Multi-tenant) con lógica de negocio completa
 """
 
+import uuid
 from django.db import models
 from django.contrib.auth.models import User
 from core.models import AuditModel, SoftDeleteModel, Sede, Empresa, TimeStampedModel
@@ -65,14 +66,6 @@ class Cliente(AuditModel, SoftDeleteModel):
     @property
     def nombre_completo(self):
         return f"{self.nombres} {self.apellidos}".strip()
-    
-    def total_gastado(self):
-        """Calcula el total gastado por el cliente"""
-        from pagos.models import Pago
-        return Pago.objects.filter(
-            ticket__cliente=self,
-            estado='PAGADO'
-        ).aggregate(total=models.Sum('monto'))['total'] or 0
 
 
 class Ticket(AuditModel, SoftDeleteModel):
@@ -96,14 +89,10 @@ class Ticket(AuditModel, SoftDeleteModel):
     
     # Nuevo campo SaaS: Secuencial humano reseteable por empresa
     secuencial = models.PositiveIntegerField(default=0, verbose_name="Secuencial Humano")
-
-    qr_code = models.ImageField(
-        upload_to='tickets/qr/',
-        blank=True,
-        null=True,
-        verbose_name="Código QR"
-    )
     
+    # Campo para rastreo público seguro (no adivinable)
+    tracking_uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True, db_index=True)
+
     cliente = models.ForeignKey(
         Cliente,
         on_delete=models.PROTECT,
@@ -160,31 +149,9 @@ class Ticket(AuditModel, SoftDeleteModel):
         return f"Ticket {self.numero_ticket} - {self.cliente.nombre_completo}"
     
     def save(self, *args, **kwargs):
-        # LÓGICA SAAS: Generar número usando configuración de empresa
-        if not self.numero_ticket and self.empresa:
-            try:
-                # Leemos la configuración consolidada directamente de la Empresa
-                prefijo = self.empresa.ticket_prefijo or 'TK-'
-            except:
-                prefijo = 'TK-'
-            
-            # Buscamos el último secuencial de ESTA empresa
-            ultimo = Ticket.objects.filter(empresa=self.empresa).order_by('-secuencial').first()
-            nuevo_sec = (ultimo.secuencial + 1) if ultimo else 1
-            self.secuencial = nuevo_sec
-            
-            # Formato simple: PREFIJO + SECUENCIAL_00000X (Ej: TK-000001)
-            self.numero_ticket = f"{prefijo}{str(nuevo_sec).zfill(6)}"
-        
-        # Fallback por si acaso falla la lógica anterior o no hay empresa (casos edge)
-        if not self.numero_ticket:
-             self.numero_ticket = generar_numero_unico(prefijo='TKT')
-
-        # Generar código QR si no existe
-        if not self.qr_code:
-            qr_data = f"WASHLY|{self.numero_ticket}|{self.id}"
-            self.qr_code = generar_qr_code(qr_data, filename=f'ticket_{self.numero_ticket}')
-        
+        from .services import TicketService
+        # Delegamos la generación de número y QR al servicio (SRP)
+        TicketService.prepare_new_ticket(self)
         super().save(*args, **kwargs)
     
     # --- MÉTODOS DE NEGOCIO ORIGINALES RESTAURADOS ---
@@ -213,7 +180,7 @@ class Ticket(AuditModel, SoftDeleteModel):
         """Verifica si el ticket puede ser entregado"""
         if self.estado != TicketEstados.LISTO:  # ✅ Usar constante
             return False, "El ticket no está listo para entrega"
-        if not self.esta_pagado() and not self.requiere_pago_anticipado:
+        if not self.esta_pagado():
             return False, "El ticket tiene saldo pendiente de pago"
         return True, ""
     
@@ -288,20 +255,9 @@ class TicketItem(AuditModel):
         return self.cantidad * self.precio_unitario
     
     def save(self, *args, **kwargs):
-        # Lógica original para determinar precio
-        if not self.precio_unitario and self.servicio:
-            if self.prenda:
-                # Buscar precio específico de servicio-prenda
-                precio_especifico = self.servicio.precios_prendas.filter(
-                    prenda=self.prenda
-                ).first()
-                if precio_especifico:
-                    self.precio_unitario = precio_especifico.precio
-                else:
-                    self.precio_unitario = self.servicio.precio_base
-            else:
-                self.precio_unitario = self.servicio.precio_base
-        
+        from .services import TicketService
+        # Delegar cálculo de precio al servicio (SRP)
+        TicketService.set_item_price(self)
         super().save(*args, **kwargs)
 
 

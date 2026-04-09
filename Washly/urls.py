@@ -49,14 +49,14 @@ urlpatterns = [
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/token/verify/', TokenVerifyView.as_view(), name='token_verify'),
     
-    # --- API ROUTES (En raíz para coincidir con Frontend) ---
-    path('', include(router.urls)),
+    # --- API ROUTES (Consistente con Auth y Frontend) ---
+    path('api/', include(router.urls)),
     
-    # Apps urls
-    path('inventario/', include('inventario.urls')),
-    path('pagos/', include('pagos.urls')),
-    path('notificaciones/', include('notificaciones.urls')),
-    path('reportes/', include('reportes.urls')),
+    # Apps urls (ahora bajo /api/ para consistencia)
+    path('api/inventario/', include('inventario.urls')),
+    path('api/pagos/', include('pagos.urls')),
+    path('api/notificaciones/', include('notificaciones.urls')),
+    path('api/reportes/', include('reportes.urls')),
 ]
 
 if settings.DEBUG:

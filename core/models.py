@@ -7,6 +7,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 from datetime import timedelta
+from encrypted_model_fields.fields import EncryptedCharField
 
 class Empresa(models.Model):
     """
@@ -57,7 +58,7 @@ class Empresa(models.Model):
     email_port = models.PositiveIntegerField(default=587, verbose_name="Puerto SMTP", blank=True, null=True)
     email_use_tls = models.BooleanField(default=True, verbose_name="Usar TLS")
     email_host_user = models.EmailField(blank=True, null=True, verbose_name="Email SMTP User")
-    email_host_password = models.CharField(max_length=128, blank=True, null=True, verbose_name="Contraseña de Aplicación SMTP")
+    email_host_password = EncryptedCharField(max_length=255, blank=True, null=True, verbose_name="Contraseña de Aplicación SMTP")
     
     # NUEVO: Toggles por evento
     notif_event_creacion = models.BooleanField(default=True, verbose_name="Email al Crear Ticket")

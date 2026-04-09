@@ -166,9 +166,8 @@ class CajaViewSet(BaseTenantViewSet):
         ultima_caja = CajaSesion.objects.filter(**filters).order_by('-fecha_cierre').first()
         
         if not ultima_caja: return Response(None)
-        detalle = {}
-        try: detalle = json.loads(ultima_caja.detalle_cierre) if ultima_caja.detalle_cierre else {}
-        except: detalle = {}
+        
+        detalle = CajaService._ensure_dict(ultima_caja.detalle_cierre)
         return Response({'EFECTIVO': detalle.get('EFECTIVO', 0), 'detalle': detalle})
 
     @action(detail=False, methods=['post'])
@@ -192,7 +191,7 @@ class CajaViewSet(BaseTenantViewSet):
             empresa=empresa,
             sede=sede,
             monto_inicial=monto_inicial,
-            detalle_apertura=json.dumps(detalle) if isinstance(detalle, dict) else str(detalle),
+            detalle_apertura=detalle,
             estado='ABIERTA',
             creado_por=request.user
         )
@@ -205,8 +204,7 @@ class CajaViewSet(BaseTenantViewSet):
         
         caja.monto_final_real = Decimal(str(request.data.get('monto_real', 0)))
         caja.comentarios = request.data.get('comentarios', '')
-        detalle = request.data.get('detalle_cierre', {})
-        caja.detalle_cierre = json.dumps(detalle) if isinstance(detalle, dict) else str(detalle)
+        caja.detalle_cierre = request.data.get('detalle_cierre', {})
         
         serializer = self.get_serializer(caja)
         caja.monto_final_sistema = Decimal(str(serializer.data['saldo_actual']))

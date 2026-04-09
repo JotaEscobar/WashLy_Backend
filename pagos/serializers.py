@@ -58,6 +58,17 @@ class CajaSesionSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['empresa', 'creado_por', 'monto_final_sistema', 'diferencia']
 
+    def to_representation(self, instance):
+        """Limpieza automatica de comentarios tecnicos en cualquier respuesta del API."""
+        ret = super().to_representation(instance)
+        if ret.get('comentarios'):
+            # Reutilizamos la lógica de limpieza (duplicada aquí para evitar import circular si es necesario, 
+            # aunque services suele ser seguro)
+            comment = ret['comentarios']
+            if ' | Detalle Cierre:' in comment:
+                ret['comentarios'] = comment.split(' | Detalle Cierre:')[0].strip()
+        return ret
+
     def _get_sede_from_context(self):
         """
         Obtiene la sede actual desde el contexto del serializer.

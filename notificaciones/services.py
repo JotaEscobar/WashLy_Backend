@@ -53,9 +53,26 @@ class EmailService:
                 'descripcion': item.descripcion,
             })
 
-        # Logo: preferir ticket_logo, luego logo general de empresa
-        logo_obj = empresa.ticket_logo if empresa.ticket_logo else empresa.logo
-        logo_url = f"{settings.SITE_URL.rstrip('/')}{logo_obj.url}" if logo_obj else None
+        # Logo: preferir ticket_logo (si tiene nombre), luego logo general de empresa
+        # Esto permite subir una versión blanca del logo específicamente para correos/tickets
+        logo_obj = None
+        if empresa.ticket_logo and empresa.ticket_logo.name:
+            logo_obj = empresa.ticket_logo
+        elif empresa.logo and empresa.logo.name:
+            logo_obj = empresa.logo
+        
+        logo_url = None
+        if logo_obj:
+            url = logo_obj.url
+            logo_url = url if url.startswith('http') else f"{settings.SITE_URL.rstrip('/')}{url}"
+        
+        # URL de Seguimiento Público
+        frontend_base = getattr(settings, 'FRONTEND_URL', settings.SITE_URL).rstrip('/')
+        tracking_url = f"{frontend_base}/seguimiento/{ticket.tracking_uuid}"
+        
+        # Generar URL del QR dinámico (API externa gratuita)
+        # qrcode.show() no se utiliza aquí ya que queremos una URL de imagen para el email.
+        qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=160x160&data={tracking_url}"
 
         return {
             'ticket': ticket,
@@ -65,6 +82,8 @@ class EmailService:
             'total': fmt(total),
             'moneda': moneda,
             'logo_url': logo_url,
+            'tracking_url': tracking_url,
+            'qr_url': qr_url,
             'anio': datetime.now().year,
         }
 

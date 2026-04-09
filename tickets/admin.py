@@ -13,12 +13,6 @@ class ClienteAdmin(admin.ModelAdmin):
     search_fields = ['numero_documento', 'nombres', 'apellidos', 'telefono', 'email']
     readonly_fields = ['creado_en', 'actualizado_en', 'creado_por', 'actualizado_por']
 
-    def codigo_qr_imagen(self, obj):
-        if obj.qr_code:
-            return mark_safe(f'<img src="{obj.qr_code.url}" width="150" height="150" />')
-        return "No generado"
-    
-    codigo_qr_imagen.short_description = 'Código QR'
     
     fieldsets = (
         ('Información Personal', {
@@ -62,14 +56,14 @@ class TicketAdmin(admin.ModelAdmin):
     list_filter = ['estado', 'prioridad', 'activo', 'fecha_recepcion', 'sede']
     search_fields = ['numero_ticket', 'cliente__nombres', 'cliente__apellidos', 'cliente__numero_documento']
     readonly_fields = [
-        'numero_ticket', 'qr_code', 'fecha_recepcion', 'creado_en',
+        'numero_ticket', 'fecha_recepcion', 'creado_en',
         'actualizado_en', 'creado_por', 'actualizado_por'
     ]
     inlines = [TicketItemInline, EstadoHistorialInline]
     
     fieldsets = (
         ('Identificación', {
-            'fields': ('numero_ticket', 'qr_code')
+            'fields': ('numero_ticket',)
         }),
         ('Cliente y Sede', {
             'fields': ('cliente', 'sede')

@@ -1,12 +1,16 @@
-from django.db.models import Q, Sum, F, DecimalField, OuterRef, Subquery, Max, Count, Prefetch
-from django.db.models.functions import Coalesce
-from django.utils import timezone
-from .models import Cliente, Ticket, TicketItem, EstadoHistorial
+from django.apps import apps
 
 class ClienteService:
     @staticmethod
     def get_clientes_with_stats(empresa, is_list=True):
         """Obtiene clientes con anotaciones de CRM para la empresa dada"""
+        from django.db.models import Q, Sum, Max, Count, DecimalField
+        from django.db.models.functions import Coalesce
+        from django.db.models import Prefetch
+        
+        Cliente = apps.get_model('tickets', 'Cliente')
+        Ticket = apps.get_model('tickets', 'Ticket')
+        
         queryset = Cliente.objects.filter(empresa=empresa, activo=True)
         
         # Anotación base: Última visita
@@ -41,6 +45,7 @@ class ClienteService:
 
     @staticmethod
     def restore(pk, empresa):
+        Cliente = apps.get_model('tickets', 'Cliente')
         try:
             cliente = Cliente.objects.get(pk=pk, empresa=empresa, activo=False)
             cliente.restore()
@@ -50,8 +55,32 @@ class ClienteService:
 
 class TicketService:
     @staticmethod
+    def set_item_price(item):
+        """
+        Determina el precio unitario de un item basado en el servicio y prenda.
+        Sigue la jerarquía: Precio específico por prenda > Precio base del servicio.
+        """
+        if not item.precio_unitario and item.servicio:
+            if item.prenda:
+                # Buscar precio específico de servicio-prenda
+                precio_especifico = item.servicio.precios_prendas.filter(
+                    prenda=item.prenda
+                ).first()
+                if precio_especifico:
+                    item.precio_unitario = precio_especifico.precio
+                else:
+                    item.precio_unitario = item.servicio.precio_base
+            else:
+                item.precio_unitario = item.servicio.precio_base
+        return item
+
+    @staticmethod
     def get_filtered_tickets(empresa, sede=None, filters_dict=None):
         """Lógica central de filtrado y anotaciones financieras de tickets"""
+        from django.db.models import Q, Sum, F, DecimalField, OuterRef, Subquery
+        from django.db.models.functions import Coalesce
+        
+        Ticket = apps.get_model('tickets', 'Ticket')
         from pagos.models import Pago # Evitar circular import
         
         queryset = Ticket.objects.filter(empresa=empresa, activo=True).select_related(
@@ -116,6 +145,7 @@ class TicketService:
             ticket.save()
 
         # Crear historial
+        EstadoHistorial = apps.get_model('tickets', 'EstadoHistorial')
         EstadoHistorial.objects.create(
             ticket=ticket,
             empresa=ticket.empresa,
@@ -136,6 +166,7 @@ class TicketService:
         ticket.estado = 'CANCELADO'
         ticket.save()
         
+        EstadoHistorial = apps.get_model('tickets', 'EstadoHistorial')
         EstadoHistorial.objects.create(
             ticket=ticket,
             empresa=ticket.empresa,
@@ -149,6 +180,7 @@ class TicketService:
     @staticmethod
     def get_dashboard_stats(queryset):
         """Calcula estadísticas rápidas para el dashboard"""
+        from django.utils import timezone
         return {
             'total': queryset.count(),
             'recibidos': queryset.filter(estado='RECIBIDO').count(),
@@ -158,3 +190,37 @@ class TicketService:
             'urgentes': queryset.filter(prioridad='URGENTE').count(),
             'express': queryset.filter(prioridad='EXPRESS').count(),
         }
+
+    @staticmethod
+    def prepare_new_ticket(ticket):
+        """
+        Lógica de inicialización para nuevos tickets:
+        - Generación de secuencial único por empresa
+        - Generación de número de ticket formateado
+        - Generación de código QR
+        """
+        from core.utils import generar_numero_unico, generar_qr_code
+        from django.db import transaction
+
+        # 1. Generar número y secuencial si no existe
+        if not ticket.numero_ticket and ticket.empresa:
+            with transaction.atomic():
+                try:
+                    prefijo = ticket.empresa.ticket_prefijo or 'TK-'
+                except AttributeError:
+                    prefijo = 'TK-'
+                
+                Ticket = apps.get_model('tickets', 'Ticket')
+                ultimo = Ticket.objects.select_for_update().filter(
+                    empresa=ticket.empresa
+                ).order_by('-secuencial').first()
+                
+                nuevo_sec = (ultimo.secuencial + 1) if ultimo else 1
+                ticket.secuencial = nuevo_sec
+                ticket.numero_ticket = f"{prefijo}{str(nuevo_sec).zfill(6)}"
+        
+        # Fallback de número único
+        if not ticket.numero_ticket:
+             ticket.numero_ticket = generar_numero_unico(prefijo='TKT')
+
+        return ticket

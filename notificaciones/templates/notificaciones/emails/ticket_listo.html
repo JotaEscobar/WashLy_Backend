@@ -12,9 +12,9 @@
     .card    { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 8px; overflow: hidden; }
 
     /* HEADER */
-    .header { background-color: #111827; padding: 32px 40px; text-align: center; }
-    .header img { max-height: 48px; max-width: 160px; display: block; margin: 0 auto; }
-    .header-name { color: #9ca3af; font-size: 13px; margin: 10px 0 0; letter-spacing: 0.3px; }
+    .header { background-color: #111827; padding: 40px 20px; text-align: center; }
+    .header-title { color: #ffffff; font-size: 28px; font-weight: 300; margin: 0; letter-spacing: 1px; font-family: 'Georgia', serif; }
+    .header-subtitle { color: #9ca3af; font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin-top: 8px; }
 
     /* ORDER BAND */
     .order-band { border-bottom: 1px solid #e5e7eb; padding: 20px 40px; }
@@ -43,6 +43,12 @@
     .delivery-block p { font-size: 13px; color: #374151; margin: 0; line-height: 1.5; }
     .delivery-block strong { color: #111827; }
 
+    /* QR BLOCK */
+    .qr-block { margin-top: 32px; padding: 24px; background: #ffffff; border: 1px dashed #d1d5db; border-radius: 8px; text-align: center; }
+    .qr-image { width: 140px; height: 140px; margin-bottom: 12px; }
+    .qr-text  { font-size: 13px; color: #4b5563; line-height: 1.5; }
+    .btn-track { color: #2563eb !important; text-decoration: underline; font-size: 13px; font-weight: 600; }
+
     /* CLOSING */
     .closing { font-size: 13px; color: #6b7280; line-height: 1.6; margin: 0; }
 
@@ -65,12 +71,8 @@
 
     <!-- HEADER -->
     <div class="header">
-      {% if logo_url %}
-        <img src="{{ logo_url }}" alt="{{ empresa.nombre }}" />
-      {% else %}
-        <div class="header-name">{{ empresa.nombre }}</div>
-      {% endif %}
-      {% if logo_url %}<p class="header-name">{{ empresa.nombre }}</p>{% endif %}
+      <h1 class="header-title">{{ empresa.nombre }}</h1>
+      <p class="header-subtitle">Laundry & Dry Cleaning</p>
     </div>
 
     <!-- ORDER BAND -->
@@ -119,8 +121,20 @@
         {% endif %}
       </div>
 
+      <!-- QR TRACKING -->
+      {% if qr_url %}
+      <div style="margin-top: 32px; padding: 24px; background-color: #f9fafb; border: 1px dashed #d1d5db; border-radius: 8px; text-align: center;">
+        <p style="margin: 0 0 16px; font-size: 14px; font-weight: 600; color: #111827;">Escanea el QR para hacerle seguimiento a tu servicio</p>
+        <div style="display: inline-block; padding: 8px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 4px;">
+          <img src="{{ qr_url }}" alt="QR Tracking" width="160" height="160" style="display: block; width: 160px; height: 160px;" />
+        </div>
+        <p style="margin: 12px 0 0; font-size: 12px; color: #6b7280;">O haz clic <a href="{{ tracking_url }}" style="color: #2563eb; text-decoration: underline;">aquí</a> para ver en el navegador.</p>
+      </div>
+      {% endif %}
+
+
       <!-- CLOSING -->
-      <p class="closing">
+      <p class="closing" style="margin-top: 28px;">
         Si tiene alguna consulta, contáctenos en
         {% if empresa.email_contacto %}
           <a href="mailto:{{ empresa.email_contacto }}" style="color:#2563eb; text-decoration:none;">{{ empresa.email_contacto }}</a>{% if empresa.telefono_contacto %} o al {{ empresa.telefono_contacto }}{% endif %}.

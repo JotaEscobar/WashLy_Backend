@@ -1,0 +1,85 @@
+/* Custom styles for Washly Admin */
+
+/* Logo size adjustment for the IMAGE itself */
+.main-sidebar .brand-link {
+    padding: 10px 15px !important;
+    min-height: 70px !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.main-sidebar .brand-link .brand-image {
+    max-height: 55px !important;
+    width: auto !important;
+    float: none !important;
+    margin-right: 12px !important;
+    opacity: 1 !important;
+}
+
+.main-sidebar .brand-link .brand-text {
+    font-weight: 700 !important;
+    font-size: 1.1rem !important;
+}
+
+/* New Midnight Dark Blue Theme - Forced Overrides */
+:root {
+    --washly-blue: #0f172a !important; /* Slate 900 */
+    --washly-accent: #1e293b !important; /* Dark Slate Blue */
+}
+
+/* Sidebar and Header background */
+.main-header,
+.main-sidebar,
+.main-sidebar .brand-link,
+.sidebar-dark-navy,
+.navbar-navy,
+.brand-link {
+    background-color: #0f172a !important;
+    border-color: #0f172a !important;
+}
+
+/* Header Text and Icons Contrast */
+.main-header .nav-link,
+.main-header .navbar-nav .nav-link,
+.main-header .navbar-nav .nav-link i,
+.main-header .btn-navbar i {
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.main-header .nav-link:hover,
+.main-header .navbar-nav .nav-link:hover {
+    color: #fff !important;
+}
+
+/* Specific sidebar elements */
+.sidebar {
+    background-color: #0f172a !important;
+}
+
+/* Accent for buttons and hover items */
+.nav-pills .nav-link.active,
+.nav-sidebar > .nav-item > .nav-link.active,
+.btn-primary {
+    background-color: #1e293b !important; /* Dark Slate Blue */
+    border-color: #111827 !important;
+    color: #fff !important;
+}
+
+/* Timeline icons (Acciones recientes) */
+.timeline > div > .fas, 
+.timeline > div > .far, 
+.timeline > div > .fab {
+    background-color: #1e293b !important;
+    color: #fff !important;
+}
+
+/* Override any green elements (success) with the new blue */
+.bg-success, .btn-success, .badge-success {
+    background-color: var(--washly-accent) !important;
+    border-color: var(--washly-accent) !important;
+    color: #fff !important;
+}
+
+.text-success {
+    color: var(--washly-accent) !important;
+}

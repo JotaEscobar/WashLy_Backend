@@ -44,8 +44,8 @@ class CajaSesion(AuditModel):
     monto_final_real = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     diferencia = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     
-    detalle_apertura = models.TextField(default="{}") 
-    detalle_cierre = models.TextField(default="{}")
+    detalle_apertura = models.JSONField(default=dict, verbose_name="Detalle de Apertura") 
+    detalle_cierre = models.JSONField(default=dict, verbose_name="Detalle de Cierre")
     estado = models.CharField(max_length=10, default='ABIERTA', choices=[('ABIERTA', 'Abierta'), ('CERRADA', 'Cerrada')])
     comentarios = models.TextField(blank=True, null=True)
 

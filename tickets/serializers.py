@@ -110,12 +110,11 @@ class TicketSerializer(serializers.ModelSerializer):
     total = serializers.SerializerMethodField()
     saldo_pendiente = serializers.SerializerMethodField()
     esta_pagado = serializers.SerializerMethodField()
-    qr_code_url = serializers.SerializerMethodField()
     
     class Meta:
         model = Ticket
         fields = [
-            'id', 'numero_ticket', 'qr_code', 'qr_code_url', 'cliente', 'cliente_info',
+            'id', 'numero_ticket', 'cliente', 'cliente_info',
             'sede', 'estado', 'prioridad', 'fecha_recepcion', 'fecha_prometida',
             'fecha_entrega', 'observaciones',
             'tipo_entrega',
@@ -124,7 +123,7 @@ class TicketSerializer(serializers.ModelSerializer):
             'creado_en', 'actualizado_en', 'activo'
         ]
         read_only_fields = [
-            'numero_ticket', 'qr_code', 'fecha_recepcion', 'creado_en', 
+            'numero_ticket', 'fecha_recepcion', 'creado_en', 
             'actualizado_en', 'total', 'saldo_pendiente', 'esta_pagado',
             'empresa', 'creado_por'
         ]
@@ -132,17 +131,13 @@ class TicketSerializer(serializers.ModelSerializer):
     def get_total(self, obj): return float(obj.calcular_total())
     def get_saldo_pendiente(self, obj): return float(obj.calcular_saldo_pendiente())
     def get_esta_pagado(self, obj): return obj.esta_pagado()
-    def get_qr_code_url(self, obj):
-        if obj.qr_code:
-            request = self.context.get('request')
-            if request: return request.build_absolute_uri(obj.qr_code.url)
-        return None
 
 class TicketListSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source='cliente.nombre_completo', read_only=True)
     total = serializers.SerializerMethodField()
     saldo_pendiente = serializers.SerializerMethodField()
     es_extornable = serializers.SerializerMethodField()
+    ultimo_metodo_pago = serializers.CharField(read_only=True)
     
     class Meta:
         model = Ticket
@@ -151,7 +146,7 @@ class TicketListSerializer(serializers.ModelSerializer):
             'prioridad', 'fecha_recepcion', 'fecha_prometida', 'total',
             'saldo_pendiente', 'activo',
             'creado_en', 'actualizado_en',
-            'es_extornable'
+            'es_extornable', 'ultimo_metodo_pago'
         ]
     
     def get_total(self, obj): return float(obj.calcular_total())
@@ -180,13 +175,13 @@ class TicketCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ticket
         fields = [
-            'id', 'numero_ticket', 'qr_code', 'creado_en',
+            'id', 'numero_ticket', 'creado_en',
             'cliente', 'sede', 'prioridad', 'fecha_prometida', 
             'tipo_entrega', 
             'observaciones', 'items',
             'pago_monto', 'metodo_pago_id', 'metodo_pago_str'
         ]
-        read_only_fields = ['id', 'numero_ticket', 'qr_code', 'creado_en', 'empresa', 'creado_por']
+        read_only_fields = ['id', 'numero_ticket', 'creado_en', 'empresa', 'creado_por']
     
     @transaction.atomic
     def create(self, validated_data):
@@ -248,3 +243,36 @@ class TicketUpdateEstadoSerializer(serializers.Serializer):
             if value not in transiciones_validas.get(ticket.estado, []):
                 raise serializers.ValidationError(f"No se puede cambiar de {ticket.estado} a {value}")
         return value
+
+
+class TicketItemPublicSerializer(serializers.ModelSerializer):
+    """Serializer limitado para items en vista pública"""
+    servicio_nombre = serializers.CharField(source='servicio.nombre', read_only=True)
+    prenda_nombre = serializers.CharField(source='prenda.nombre', read_only=True)
+    
+    class Meta:
+        model = TicketItem
+        fields = ['servicio_nombre', 'prenda_nombre', 'cantidad', 'descripcion']
+
+
+class TicketPublicSerializer(serializers.ModelSerializer):
+    """Serializer para el rastreo público de tickets (sin auth)"""
+    items = TicketItemPublicSerializer(many=True, read_only=True)
+    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True)
+    empresa_logo = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Ticket
+        fields = [
+            'tracking_uuid', 'numero_ticket', 'estado', 'fecha_recepcion', 'fecha_prometida', 'fecha_entrega',
+            'empresa_nombre', 'empresa_logo', 'items'
+        ]
+        read_only_fields = ['tracking_uuid', 'numero_ticket', 'estado', 'fecha_recepcion', 'fecha_prometida', 'fecha_entrega', 'empresa_nombre', 'empresa_logo', 'items']
+
+    def get_empresa_logo(self, obj):
+        logo_obj = obj.empresa.ticket_logo if obj.empresa.ticket_logo else obj.empresa.logo
+        if logo_obj:
+            from django.conf import settings
+            url = logo_obj.url
+            return url if url.startswith('http') else f"{settings.SITE_URL.rstrip('/')}{url}"
+        return None

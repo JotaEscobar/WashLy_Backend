@@ -120,8 +120,6 @@ class EmpresaViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         if not serializer.is_valid():
-            print(f"DEBUG Empresa URL: {request.path}")
-            print(f"DEBUG Empresa validation errors: {serializer.errors}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         self.perform_update(serializer)
         return Response(serializer.data)
